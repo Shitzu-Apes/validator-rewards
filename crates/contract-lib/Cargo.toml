@@ -1,0 +1,17 @@
+[package]
+name = "contract-lib"
+version = "1.0.0"
+authors = ["Mario Reder <mario.reder@pm.me>"]
+edition = "2021"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+near-contract-standards.workspace = true
+near-sdk.workspace = true
+primitive-types.workspace = true
+thiserror.workspace = true
+
+[features]
+integration-test = []
