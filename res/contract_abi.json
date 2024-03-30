@@ -11,7 +11,10 @@
     "functions": [
       {
         "name": "burn",
-        "kind": "call"
+        "kind": "call",
+        "modifiers": [
+          "payable"
+        ]
       },
       {
         "name": "contract_source_metadata",
@@ -192,6 +195,15 @@
               "name": "validator",
               "type_schema": {
                 "$ref": "#/definitions/AccountId"
+              }
+            },
+            {
+              "name": "token_whitelist",
+              "type_schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/definitions/AccountId"
+                }
               }
             }
           ]

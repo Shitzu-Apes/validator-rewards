@@ -4,7 +4,6 @@ use near_contract_standards::{
         events::{FtBurn, FtMint, FtTransfer},
         metadata::{FungibleTokenMetadata, FungibleTokenMetadataProvider},
         receiver::FungibleTokenReceiver,
-        resolver::ext_ft_resolver,
         FungibleTokenCore,
     },
     storage_management::{StorageBalance, StorageBalanceBounds, StorageManagement},
@@ -15,20 +14,20 @@ use near_sdk::{
     env,
     json_types::U128,
     near_bindgen, require,
-    store::TreeMap,
+    store::{Lazy, TreeMap},
     AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault, PromiseOrValue,
 };
 use primitive_types::U256;
 
 const GAS_FOR_BURN: Gas = Gas::from_tgas(5);
-const GAS_FOR_FT_TRANSFER: Gas = Gas::from_tgas(8);
-const GAS_FOR_FT_RESOLVE_TRANSFER: Gas = Gas::from_tgas(6);
+const GAS_FOR_FT_TRANSFER: Gas = Gas::from_tgas(10);
 
 #[derive(BorshStorageKey, BorshSerialize)]
 #[borsh(crate = "near_sdk::borsh")]
 pub enum StorageKey {
     Accounts,
     Deposits,
+    TokenWhitelist,
 }
 
 #[near_bindgen]
@@ -41,12 +40,13 @@ pub struct Contract {
     deposits: TreeMap<AccountId, u128>,
     shares: u128,
     is_minted: bool,
+    token_whitelist: Lazy<Vec<AccountId>>,
 }
 
 #[near_bindgen]
 impl Contract {
     #[init]
-    pub fn new(owner: AccountId, validator: AccountId) -> Self {
+    pub fn new(owner: AccountId, validator: AccountId, token_whitelist: Vec<AccountId>) -> Self {
         Self {
             owner,
             validator,
@@ -54,6 +54,7 @@ impl Contract {
             deposits: TreeMap::new(StorageKey::Deposits),
             shares: 0,
             is_minted: false,
+            token_whitelist: Lazy::new(StorageKey::TokenWhitelist, token_whitelist),
         }
     }
 
@@ -74,6 +75,7 @@ impl Contract {
         .emit();
     }
 
+    #[payable]
     pub fn burn(&mut self) {
         require!(self.is_minted, "Not yet minted");
         require!(
@@ -81,12 +83,6 @@ impl Contract {
                 >= GAS_FOR_BURN
                     .checked_add(
                         GAS_FOR_FT_TRANSFER
-                            .checked_mul(self.deposits.len() as u64)
-                            .unwrap()
-                    )
-                    .unwrap()
-                    .checked_add(
-                        GAS_FOR_FT_RESOLVE_TRANSFER
                             .checked_mul(self.deposits.len() as u64)
                             .unwrap()
                     )
@@ -104,16 +100,7 @@ impl Contract {
             ext_ft_core::ext(token_id.clone())
                 .with_unused_gas_weight(1)
                 .with_attached_deposit(NearToken::from_yoctonear(1))
-                .ft_transfer(sender_id.clone(), amount.into(), None)
-                .then(
-                    ext_ft_resolver::ext(token_id.clone())
-                        .with_static_gas(GAS_FOR_FT_RESOLVE_TRANSFER)
-                        .ft_resolve_transfer(
-                            self.validator.clone(),
-                            sender_id.clone(),
-                            amount.into(),
-                        ),
-                );
+                .ft_transfer(sender_id.clone(), amount.into(), None);
         }
         self.shares -= balance;
 
@@ -140,18 +127,18 @@ impl FungibleTokenCore for Contract {
         );
         require!(amount > 0, "The amount should be a positive number");
 
-        if !self.accounts.contains_key(&sender_id) {
-            self.accounts.insert(sender_id.clone(), 0);
+        if !self.accounts.contains_key(&receiver_id) {
+            self.accounts.insert(receiver_id.clone(), 0);
         }
-        let balance = self.accounts.get_mut(&sender_id).unwrap();
-        *balance += amount;
+        let balance = self.accounts.get_mut(&receiver_id).unwrap();
+        *balance = balance.checked_add(amount).unwrap();
 
         let balance = self.accounts.get_mut(&self.validator).unwrap();
-        *balance -= amount;
+        *balance = balance.checked_sub(amount).unwrap();
 
         FtTransfer {
             old_owner_id: &self.validator,
-            new_owner_id: &sender_id,
+            new_owner_id: &receiver_id,
             amount: U128(amount),
             memo: memo.as_deref(),
         }
@@ -194,6 +181,10 @@ impl FungibleTokenReceiver for Contract {
         require!(!self.is_minted, "Already minted");
         require!(sender_id == self.owner, "Only owner can deposit");
         let token_id = env::predecessor_account_id();
+        require!(
+            self.token_whitelist.contains(&token_id),
+            "Token not whitelisted"
+        );
 
         match self.deposits.get_mut(&token_id) {
             Some(deposit) => {
