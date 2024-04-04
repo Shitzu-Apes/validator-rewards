@@ -4,10 +4,12 @@ resolver = "2"
 
 [workspace.dependencies]
 anyhow = "1"
+futures = "0.3"
 near-workspaces = { version = "0.10", default-features = false }
 primitive-types = { version = "0.12", default-features = false }
 owo-colors = "4"
 thiserror = "1"
+tokio = "1"
 
 [workspace.dependencies.near-contract-standards]
 version = "5"

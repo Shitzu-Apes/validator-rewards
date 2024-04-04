@@ -1,45 +1,56 @@
+mod owner;
+mod view;
+
+use std::cmp;
+
 use near_contract_standards::{
     fungible_token::{
         core::ext_ft_core,
-        events::{FtBurn, FtMint, FtTransfer},
+        events::{FtBurn, FtTransfer},
         metadata::{FungibleTokenMetadata, FungibleTokenMetadataProvider},
-        receiver::FungibleTokenReceiver,
-        FungibleTokenCore,
+        receiver::{ext_ft_receiver, FungibleTokenReceiver},
+        FungibleTokenCore, FungibleTokenResolver,
     },
     storage_management::{StorageBalance, StorageBalanceBounds, StorageManagement},
 };
+#[allow(deprecated)]
 use near_sdk::{
     assert_one_yocto,
     borsh::{BorshDeserialize, BorshSerialize},
     env,
     json_types::U128,
     near_bindgen, require,
-    store::{Lazy, TreeMap},
+    store::{Lazy, TreeMap, UnorderedMap},
     AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault, PromiseOrValue,
 };
+use near_sdk::{serde_json, PromiseResult};
 use primitive_types::U256;
 
 const GAS_FOR_BURN: Gas = Gas::from_tgas(5);
 const GAS_FOR_FT_TRANSFER: Gas = Gas::from_tgas(10);
+const GAS_FOR_FT_TRANSFER_CALL: Gas = Gas::from_tgas(60);
+const GAS_FOR_RESOLVE_TRANSFER: Gas = Gas::from_tgas(5);
 
 #[derive(BorshStorageKey, BorshSerialize)]
 #[borsh(crate = "near_sdk::borsh")]
 pub enum StorageKey {
     Accounts,
     Deposits,
+    Rewards,
     TokenWhitelist,
 }
 
 #[near_bindgen]
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault)]
 #[borsh(crate = "near_sdk::borsh")]
+#[allow(deprecated)]
 pub struct Contract {
     owner: AccountId,
     validator: AccountId,
     accounts: TreeMap<AccountId, u128>,
-    deposits: TreeMap<AccountId, u128>,
+    deposits: UnorderedMap<AccountId, u128>,
+    rewards: UnorderedMap<AccountId, u128>,
     shares: u128,
-    is_minted: bool,
     token_whitelist: Lazy<Vec<AccountId>>,
 }
 
@@ -47,43 +58,26 @@ pub struct Contract {
 impl Contract {
     #[init]
     pub fn new(owner: AccountId, validator: AccountId, token_whitelist: Vec<AccountId>) -> Self {
+        #[allow(deprecated)]
         Self {
             owner,
             validator,
             accounts: TreeMap::new(StorageKey::Accounts),
-            deposits: TreeMap::new(StorageKey::Deposits),
+            deposits: UnorderedMap::new(StorageKey::Deposits),
+            rewards: UnorderedMap::new(StorageKey::Rewards),
             shares: 0,
-            is_minted: false,
             token_whitelist: Lazy::new(StorageKey::TokenWhitelist, token_whitelist),
         }
     }
 
-    pub fn mint(&mut self) {
-        require!(!self.is_minted, "Already minted");
-        require!(
-            env::predecessor_account_id() == self.owner,
-            "Only owner can call this function"
-        );
-        self.shares = NearToken::from_near(1).as_yoctonear();
-        self.is_minted = true;
-        self.accounts.insert(self.validator.clone(), self.shares);
-        FtMint {
-            owner_id: &self.validator,
-            amount: self.shares.into(),
-            memo: None,
-        }
-        .emit();
-    }
-
     #[payable]
     pub fn burn(&mut self) {
-        require!(self.is_minted, "Not yet minted");
         require!(
             env::prepaid_gas()
                 >= GAS_FOR_BURN
                     .checked_add(
                         GAS_FOR_FT_TRANSFER
-                            .checked_mul(self.deposits.len() as u64)
+                            .checked_mul(self.rewards.len() as u64)
                             .unwrap()
                     )
                     .unwrap(),
@@ -93,7 +87,7 @@ impl Contract {
 
         let balance = self.accounts.remove(&sender_id).unwrap();
 
-        for (token_id, deposit) in self.deposits.iter_mut() {
+        for (token_id, deposit) in self.rewards.iter_mut() {
             let amount =
                 (U256::from(balance) * U256::from(*deposit) / U256::from(self.shares)).as_u128();
             *deposit -= amount;
@@ -131,10 +125,10 @@ impl FungibleTokenCore for Contract {
             self.accounts.insert(receiver_id.clone(), 0);
         }
         let balance = self.accounts.get_mut(&receiver_id).unwrap();
-        *balance = balance.checked_add(amount).unwrap();
+        *balance += amount;
 
-        let balance = self.accounts.get_mut(&self.validator).unwrap();
-        *balance = balance.checked_sub(amount).unwrap();
+        let balance = self.accounts.get_mut(&sender_id).unwrap();
+        *balance -= amount;
 
         FtTransfer {
             old_owner_id: &self.validator,
@@ -153,7 +147,37 @@ impl FungibleTokenCore for Contract {
         memo: Option<String>,
         msg: String,
     ) -> PromiseOrValue<U128> {
-        env::panic_str("unimplemented");
+        assert_one_yocto();
+        require!(
+            env::prepaid_gas() > GAS_FOR_FT_TRANSFER_CALL,
+            "More gas is required"
+        );
+        let sender_id = env::predecessor_account_id();
+        let amount = amount.0;
+        require!(sender_id == self.owner, "Only owner can call this function");
+        require!(amount > 0, "The amount should be a positive number");
+
+        if !self.accounts.contains_key(&receiver_id) {
+            self.accounts.insert(receiver_id.clone(), 0);
+        }
+        let balance = self.accounts.get_mut(&receiver_id).unwrap();
+        *balance += amount;
+
+        let balance = self.accounts.get_mut(&sender_id).unwrap();
+        *balance -= amount;
+
+        let receiver_gas = env::prepaid_gas()
+            .checked_sub(GAS_FOR_FT_TRANSFER_CALL)
+            .unwrap_or_else(|| env::panic_str("Prepaid gas overflow"));
+        ext_ft_receiver::ext(receiver_id.clone())
+            .with_unused_gas_weight(1)
+            .ft_on_transfer(sender_id.clone(), amount.into(), msg)
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_FOR_RESOLVE_TRANSFER)
+                    .ft_resolve_transfer(sender_id, receiver_id, amount.into()),
+            )
+            .into()
     }
 
     fn ft_total_supply(&self) -> U128 {
@@ -178,7 +202,6 @@ impl FungibleTokenReceiver for Contract {
         amount: U128,
         msg: String,
     ) -> PromiseOrValue<U128> {
-        require!(!self.is_minted, "Already minted");
         require!(sender_id == self.owner, "Only owner can deposit");
         let token_id = env::predecessor_account_id();
         require!(
@@ -195,6 +218,51 @@ impl FungibleTokenReceiver for Contract {
             }
         }
         PromiseOrValue::Value(0.into())
+    }
+}
+
+#[near_bindgen]
+impl FungibleTokenResolver for Contract {
+    fn ft_resolve_transfer(
+        &mut self,
+        sender_id: AccountId,
+        receiver_id: AccountId,
+        amount: U128,
+    ) -> U128 {
+        let amount = amount.0;
+
+        // Get the unused amount from the `ft_on_transfer` call result.
+        let unused_amount = match env::promise_result(0) {
+            PromiseResult::Successful(value) => {
+                if let Ok(unused_amount) = serde_json::from_slice::<U128>(&value) {
+                    cmp::min(amount, unused_amount.0)
+                } else {
+                    amount
+                }
+            }
+            PromiseResult::Failed => amount,
+        };
+
+        if unused_amount > 0 {
+            let receiver_balance = self.accounts.get_mut(&receiver_id).unwrap();
+            let refund_amount = std::cmp::min(*receiver_balance, unused_amount);
+            *receiver_balance -= refund_amount;
+
+            let sender_balance = self.accounts.get_mut(&sender_id).unwrap();
+            *sender_balance += refund_amount;
+
+            FtTransfer {
+                old_owner_id: &receiver_id,
+                new_owner_id: &sender_id,
+                amount: U128(refund_amount),
+                memo: Some("refund"),
+            }
+            .emit();
+            let used_amount = amount - refund_amount;
+            U128(used_amount)
+        } else {
+            U128(amount)
+        }
     }
 }
 

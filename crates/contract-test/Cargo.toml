@@ -1,0 +1,16 @@
+[package]
+name = "contract-test"
+version = "1.0.0"
+authors = ["Mario Reder <mario.reder@pm.me>"]
+edition = "2021"
+
+[dev-dependencies]
+contract-lib = { path = "../contract-lib" }
+test-token = { path = "../test-token" }
+anyhow.workspace = true
+futures.workspace = true
+near-contract-standards.workspace = true
+near-sdk.workspace = true
+near-workspaces.workspace = true
+owo-colors.workspace = true
+tokio.workspace = true
