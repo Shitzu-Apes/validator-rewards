@@ -129,12 +129,12 @@ pub struct HumanReadableAccount {
 
 pub struct Init {
     pub worker: Worker<Sandbox>,
+    pub near: Account,
     pub council: Account,
     pub contract: Contract,
     pub dao_contract: Contract,
     pub pool_contract: Contract,
     pub token_contracts: Vec<Contract>,
-    // pub validator_public_key: PublicKey,
 }
 
 pub struct NeardProcess(process::Child);
@@ -277,6 +277,7 @@ pub async fn initialize_contracts() -> anyhow::Result<Init> {
 
     Ok(Init {
         worker,
+        near,
         council,
         contract,
         dao_contract,
