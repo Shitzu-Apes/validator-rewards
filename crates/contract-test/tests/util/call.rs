@@ -256,6 +256,55 @@ pub async fn act_proposal(
     )
 }
 
+pub async fn deposit_and_stake(
+    sender: &Account,
+    pool: &AccountId,
+    deposit: NearToken,
+) -> anyhow::Result<(ExecutionResult<Value>, Vec<ContractEvent>)> {
+    log_tx_result(
+        "deposit_and_stake",
+        sender
+            .call(pool, "deposit_and_stake")
+            .deposit(deposit)
+            .max_gas()
+            .transact()
+            .await?,
+    )
+}
+
+pub async fn claim(
+    sender: &Account,
+    pool: &AccountId,
+    token_id: &AccountId,
+) -> anyhow::Result<(ExecutionResult<Value>, Vec<ContractEvent>)> {
+    log_tx_result(
+        "claim",
+        sender
+            .call(pool, "claim")
+            .args_json((token_id, None::<AccountId>))
+            .deposit(NearToken::from_yoctonear(1))
+            .max_gas()
+            .transact()
+            .await?,
+    )
+}
+
+pub async fn burn(
+    sender: &Account,
+    contract: &AccountId,
+) -> anyhow::Result<(U128, Vec<ContractEvent>)> {
+    let (res, events) = log_tx_result(
+        "burn",
+        sender
+            .call(contract, "burn")
+            .deposit(NearToken::from_yoctonear(1))
+            .max_gas()
+            .transact()
+            .await?,
+    )?;
+    Ok((res.json()?, events))
+}
+
 // async fn ft_transfer_call<T: Serialize>(
 //     sender: &Account,
 //     token_id: &AccountId,

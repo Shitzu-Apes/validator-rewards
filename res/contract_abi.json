@@ -14,7 +14,13 @@
         "kind": "call",
         "modifiers": [
           "payable"
-        ]
+        ],
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        }
       },
       {
         "name": "contract_source_metadata",

@@ -5,44 +5,28 @@ pub mod view;
 
 pub use events::*;
 
+use futures::future::join_all;
 use near_sdk::{
-    env,
-    json_types::{Base58CryptoHash, Base64VecU8, U64},
-    serde::Serialize,
+    json_types::{Base58CryptoHash, Base64VecU8, U128, U64},
+    serde::{Deserialize, Serialize},
     serde_json::{self, json},
     AccountId, Gas,
 };
 use near_workspaces::{
-    network::Sandbox,
+    network::{Sandbox, ValidatorKey},
     result::{ExecutionFinalResult, ExecutionResult, Value, ViewResultDetails},
-    types::{KeyType, NearToken, SecretKey},
+    types::NearToken,
     Account, Contract, Worker,
 };
 use owo_colors::OwoColorize;
-use tokio::fs;
-
-#[macro_export]
-macro_rules! print_log {
-    ( $x:expr, $($y:expr),+ ) => {
-        let thread_name = std::thread::current().name().unwrap().to_string();
-        if thread_name == "main" {
-            println!($x, $($y),+);
-        } else {
-            let mut s = format!($x, $($y),+);
-            s = s.split('\n').map(|s| {
-                let mut pre = "    ".to_string();
-                pre.push_str(s);
-                pre.push('\n');
-                pre
-            }).collect::<String>();
-            println!(
-                "{}\n{}",
-                thread_name.bold(),
-                &s[..s.len() - 1],
-            );
-        }
-    };
-}
+use std::{
+    ops::{Deref, DerefMut},
+    path::PathBuf,
+    process,
+    str::FromStr,
+    time::Duration,
+};
+use tokio::{fs, time::sleep};
 
 #[derive(Serialize)]
 #[serde(crate = "near_sdk::serde")]
@@ -122,6 +106,27 @@ pub struct FarmingDetails {
     pub farm_id: Option<u64>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct HumanReadableFarm {
+    pub farm_id: u64,
+    pub name: String,
+    pub token_id: AccountId,
+    pub amount: U128,
+    pub start_date: U64,
+    pub end_date: U64,
+    pub active: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct HumanReadableAccount {
+    pub account_id: AccountId,
+    pub unstaked_balance: U128,
+    pub staked_balance: U128,
+    pub can_withdraw: bool,
+}
+
 pub struct Init {
     pub worker: Worker<Sandbox>,
     pub council: Account,
@@ -129,20 +134,63 @@ pub struct Init {
     pub dao_contract: Contract,
     pub pool_contract: Contract,
     pub token_contracts: Vec<Contract>,
+    // pub validator_public_key: PublicKey,
+}
+
+pub struct NeardProcess(process::Child);
+
+impl Drop for NeardProcess {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all("../../.near/data").unwrap();
+        self.0.wait().unwrap();
+    }
+}
+
+impl Deref for NeardProcess {
+    type Target = process::Child;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for NeardProcess {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+pub async fn initialize_blockchain() -> anyhow::Result<NeardProcess> {
+    let neard = NeardProcess(
+        process::Command::new("../../res/near-sandbox")
+            .args(["--home", "../../.near", "run"])
+            .spawn()?,
+    );
+    sleep(Duration::from_secs(8)).await;
+    Ok(neard)
 }
 
 pub async fn initialize_contracts() -> anyhow::Result<Init> {
-    let worker = near_workspaces::sandbox().await?;
+    let worker = near_workspaces::sandbox()
+        .rpc_addr("http://localhost:3030")
+        .validator_key(ValidatorKey::HomeDir(PathBuf::from_str("../../.near")?))
+        .await?;
 
-    let council = worker.dev_create_account().await?;
+    let near = Account::from_file("../../.near/near.json", &worker)?;
+    let council = near
+        .create_subaccount("council")
+        .initial_balance(NearToken::from_near(100_000))
+        .transact()
+        .await?
+        .into_result()?;
 
-    let key = SecretKey::from_random(KeyType::ED25519);
-    let dao_contract = worker
-        .create_tla_and_deploy(
-            "dao.test.near".parse()?,
-            key,
-            &fs::read("../../res/sputnik_dao.wasm").await?,
-        )
+    let dao_contract = near
+        .create_subaccount("dao")
+        .initial_balance(NearToken::from_near(100_000))
+        .transact()
+        .await?
+        .into_result()?
+        .deploy(&fs::read("../../res/sputnik_dao.wasm").await?)
         .await?
         .into_result()?;
     call::new_dao(
@@ -156,110 +204,57 @@ pub async fn initialize_contracts() -> anyhow::Result<Init> {
     )
     .await?;
 
-    let key = SecretKey::from_random(KeyType::ED25519);
-    let whitelist_contract = worker
-        .create_tla_and_deploy(
-            "whitelist.test.near".parse()?,
-            key,
-            &fs::read("../../res/lockup_whitelist.wasm").await?,
-        )
-        .await?
-        .into_result()?;
-    log_tx_result(
-        "Whitelist: new",
-        whitelist_contract
-            .call("new")
-            .args_json(json!({
-              "foundation_account_id": council.id()
-            }))
-            .max_gas()
-            .transact()
-            .await?,
-    )?;
-
-    let key = SecretKey::from_random(KeyType::ED25519);
-    let pool_factory_contract = worker
-        .create_tla_and_deploy(
-            "pool.test.near".parse()?,
-            key,
-            &fs::read("../../res/pool_factory.wasm").await?,
-        )
+    let pool_contract = Account::from_file("../../.near/shitzu.pool.near.json", &worker)?
+        .deploy(&fs::read("../../res/pool.wasm").await?)
         .await?
         .into_result()?;
     log_tx_result(
         "Pool: new",
-        pool_factory_contract
+        pool_contract
             .call("new")
             .args_json(json!({
-                "owner_id": council.id(),
-                "staking_pool_whitelist_account_id": whitelist_contract.id()
+                "owner_id": dao_contract.id(),
+                "stake_public_key": pool_contract.as_account().secret_key().public_key(),
+                "reward_fee_fraction": {
+                    "numerator": 1,
+                    "denominator": 2
+                },
+                "burn_fee_fraction": {
+                    "numerator": 0,
+                    "denominator": 100
+                }
             }))
             .max_gas()
             .transact()
             .await?,
     )?;
 
-    let blob = fs::read("../../res/pool.wasm").await?;
-    let storage_cost = env::storage_byte_cost()
-        .checked_mul((blob.len() + 128) as u128)
-        .unwrap();
-    let (res, _) = log_tx_result(
-        "Pool: store",
-        pool_factory_contract
-            .call("store")
-            .args(blob)
-            .max_gas()
-            .deposit(storage_cost)
-            .transact()
-            .await?,
-    )?;
-    let code_hash: String = res.json()?;
-    log_tx_result(
-        "Pool: allow_contract",
-        council
-            .call(pool_factory_contract.id(), "allow_contract")
-            .args_json((code_hash.clone(),))
-            .max_gas()
-            .transact()
-            .await?,
-    )?;
-    let _ = pool_factory_contract
-        .call("create_staking_pool")
-        .args_json(json!({
-          "code_hash": code_hash,
-          "owner_id": dao_contract.id(),
-          "reward_fee_fraction": {
-            "denominator": 2,
-            "numerator": 1
-          },
-          "stake_public_key": "ed25519:63vV68WsFzuKSFfYzr5Z5HzrTzBkERHGQ1iiox4krugg",
-          "staking_pool_id": "shitzu"
-        }))
-        .max_gas()
-        .deposit(NearToken::from_near(5))
+    let token_contracts: Vec<_> = join_all((0..3).map(|i| {
+        let near = near.clone();
+        tokio::spawn(async move {
+            initialize_token(
+                &near,
+                &format!("Token {}", i),
+                &format!("TKN{}", i),
+                None,
+                18,
+            )
+            .await
+            .unwrap()
+        })
+    }))
+    .await
+    .into_iter()
+    .map(|c| c.unwrap())
+    .collect();
+
+    let contract = near
+        .create_subaccount("contract")
+        .initial_balance(NearToken::from_near(100_000))
         .transact()
-        .await?;
-
-    let mut token_contracts = vec![];
-    for i in 0..3 {
-        let token_contract = initialize_token(
-            &worker,
-            &format!("Token {}", i),
-            &format!("TKN{}", i),
-            None,
-            18,
-        )
-        .await?;
-        token_contracts.push(token_contract);
-    }
-
-    let key = SecretKey::from_random(KeyType::ED25519);
-    let contract = worker
-        .create_tla_and_deploy(
-            "contract.test.near".parse()?,
-            key,
-            &fs::read("../../res/contract.wasm").await?,
-        )
+        .await?
+        .into_result()?
+        .deploy(&fs::read("../../res/contract.wasm").await?)
         .await?
         .into_result()?;
 
@@ -269,7 +264,7 @@ pub async fn initialize_contracts() -> anyhow::Result<Init> {
             .call("new")
             .args_json((
                 dao_contract.id(),
-                pool_factory_contract.id(),
+                pool_contract.id(),
                 token_contracts
                     .iter()
                     .map(|contract| contract.id())
@@ -279,12 +274,6 @@ pub async fn initialize_contracts() -> anyhow::Result<Init> {
             .transact()
             .await?,
     )?;
-
-    let pool_contract = Contract::from_secret_key(
-        format!("shitzu.{}", pool_factory_contract.id()).parse()?,
-        SecretKey::from_random(KeyType::ED25519),
-        &worker,
-    );
 
     Ok(Init {
         worker,
@@ -297,19 +286,19 @@ pub async fn initialize_contracts() -> anyhow::Result<Init> {
 }
 
 pub async fn initialize_token(
-    worker: &Worker<Sandbox>,
+    near: &Account,
     name: &str,
     ticker: &str,
     icon: Option<&str>,
     decimals: u8,
 ) -> anyhow::Result<Contract> {
-    let key = SecretKey::from_random(KeyType::ED25519);
-    let token_contract = worker
-        .create_tla_and_deploy(
-            format!("{}.test.near", ticker.to_lowercase()).parse()?,
-            key,
-            &fs::read("../../res/test_token.wasm").await?,
-        )
+    let token_contract = near
+        .create_subaccount(&ticker.to_lowercase())
+        .initial_balance(NearToken::from_near(100))
+        .transact()
+        .await?
+        .into_result()?
+        .deploy(&fs::read("../../res/test_token.wasm").await?)
         .await?
         .into_result()?;
     log_tx_result(
@@ -329,7 +318,7 @@ pub fn log_tx_result(
     res: ExecutionFinalResult,
 ) -> anyhow::Result<(ExecutionResult<Value>, Vec<ContractEvent>)> {
     for failure in res.receipt_failures() {
-        print_log!("{:#?}", failure.bright_red());
+        println!("{:#?}", failure.bright_red());
     }
     let mut events = vec![];
     for outcome in res.receipt_outcomes() {
@@ -340,7 +329,7 @@ pub fn log_tx_result(
                         serde_json::from_str::<ContractEvent>(&log.replace("EVENT_JSON:", ""))
                     {
                         events.push(event.clone());
-                        print_log!(
+                        println!(
                             "{}: {}\n{}",
                             "account".bright_cyan(),
                             outcome.executor_id,
@@ -348,12 +337,12 @@ pub fn log_tx_result(
                         );
                     }
                 } else {
-                    print_log!("{}", log.bright_yellow());
+                    println!("{}", log.bright_yellow());
                 }
             }
         }
     }
-    print_log!(
+    println!(
         "{} gas burnt: {:.3} {}",
         ident.italic(),
         res.total_gas_burnt.as_tgas().bright_magenta().bold(),
@@ -365,7 +354,7 @@ pub fn log_tx_result(
 pub fn log_view_result(res: ViewResultDetails) -> anyhow::Result<ViewResultDetails> {
     if !res.logs.is_empty() {
         for log in res.logs.iter() {
-            print_log!("{}", log.bright_yellow());
+            println!("{}", log.bright_yellow());
         }
     }
     Ok(res)

@@ -71,7 +71,8 @@ impl Contract {
     }
 
     #[payable]
-    pub fn burn(&mut self) {
+    pub fn burn(&mut self) -> U128 {
+        assert_one_yocto();
         require!(
             env::prepaid_gas()
                 >= GAS_FOR_BURN
@@ -104,6 +105,8 @@ impl Contract {
             memo: None,
         }
         .emit();
+
+        U128(balance)
     }
 }
 
@@ -313,7 +316,7 @@ impl FungibleTokenMetadataProvider for Contract {
             icon: None,
             reference: None,
             reference_hash: None,
-            decimals: 0,
+            decimals: 24,
         }
     }
 }
