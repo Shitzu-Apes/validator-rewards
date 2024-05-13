@@ -475,3 +475,560 @@ async fn test_multiple_users_reward_distribution() -> anyhow::Result<()> {
         Ok(_) => anyhow::Ok(()),
     }
 }
+
+#[tokio::test]
+async fn test_refresh_rewards_when_active() -> anyhow::Result<()> {
+    let mut chain = initialize_blockchain().await?;
+
+    let thread =
+        tokio::spawn(async {
+            let Init {
+                worker,
+                council,
+                contract,
+                dao_contract,
+                pool_contract,
+                token_contracts,
+                ..
+            } = initialize_contracts().await?;
+
+            let mint_amount = 1_000_000;
+
+            let (proposal_id, _) = call::propose_add_authorized_farm_token(
+                &council,
+                dao_contract.id(),
+                pool_contract.id(),
+                contract.id(),
+            )
+            .await?;
+            call::act_proposal(
+                &council,
+                dao_contract.id(),
+                proposal_id,
+                Action::VoteApprove,
+            )
+            .await?;
+
+            try_join_all(token_contracts.iter().cloned().enumerate().map(
+                |(index, token_contract)| {
+                    let council = council.clone();
+                    let contract = contract.clone();
+                    let dao_contract = dao_contract.clone();
+                    tokio::spawn(async move {
+                        call::storage_deposit(&token_contract, &council, None, None).await?;
+                        call::storage_deposit(&token_contract, &council, Some(contract.id()), None)
+                            .await?;
+                        call::storage_deposit(
+                            &token_contract,
+                            &council,
+                            Some(dao_contract.id()),
+                            None,
+                        )
+                        .await?;
+                        call::mint_tokens(&token_contract, dao_contract.id(), mint_amount).await?;
+
+                        if index == 2 {
+                            return anyhow::Ok(());
+                        }
+                        let mint_amount = if index == 0 {
+                            mint_amount
+                        } else {
+                            mint_amount / 2
+                        };
+                        let (proposal_id, _) = call::propose_deposit_tokens(
+                            &council,
+                            dao_contract.id(),
+                            token_contract.id(),
+                            contract.id(),
+                            mint_amount,
+                        )
+                        .await?;
+                        call::act_proposal(
+                            &council,
+                            dao_contract.id(),
+                            proposal_id,
+                            Action::VoteApprove,
+                        )
+                        .await?;
+                        anyhow::Ok(())
+                    })
+                },
+            ))
+            .await?;
+
+            // Dogshit has same amount of decimals as NEAR
+            // WARNING: the staking-farm contract doesn't work, if too few tokens are added for distribution
+            let shares = NearToken::from_near(1).as_yoctonear();
+
+            let (proposal_id, _) =
+                call::propose_mint_shares(&council, dao_contract.id(), contract.id(), shares)
+                    .await?;
+            call::act_proposal(
+                &council,
+                dao_contract.id(),
+                proposal_id,
+                Action::VoteApprove,
+            )
+            .await?;
+
+            let total_supply = view::ft_total_supply(&contract).await?;
+            assert_eq!(total_supply.0, shares);
+            let balance = view::ft_balance_of(&contract, dao_contract.id()).await?;
+            assert_eq!(balance.0, shares);
+
+            let block = worker.view_block().await?;
+
+            let start_date = block.timestamp() + 1_000_000_000 * 60; // 1min
+            let end_date = block.timestamp() + 1_000_000_000 * 60 * 5; // 5min
+            let (proposal_id, _) = call::propose_create_farm(
+                &council,
+                dao_contract.id(),
+                contract.id(),
+                pool_contract.id(),
+                shares,
+                "Dogshit".to_string(),
+                start_date,
+                end_date,
+            )
+            .await?;
+            call::act_proposal(
+                &council,
+                dao_contract.id(),
+                proposal_id,
+                Action::VoteApprove,
+            )
+            .await?;
+
+            let total_supply = view::ft_total_supply(&contract).await?;
+            assert_eq!(total_supply.0, shares);
+            let balance = view::ft_balance_of(&contract, dao_contract.id()).await?;
+            assert_eq!(balance.0, 0);
+            let balance = view::ft_balance_of(&contract, pool_contract.id()).await?;
+            assert_eq!(balance.0, shares);
+            let farm = view::get_farm(&pool_contract, 0).await?;
+            assert!(farm.active);
+            assert!(farm.start_date.0 > worker.view_block().await?.timestamp());
+
+            call::deposit_and_stake(&council, pool_contract.id(), NearToken::from_near(10_000))
+                .await?;
+            let account = view::get_account(&pool_contract, council.id()).await?;
+            assert_eq!(
+                account.staked_balance.0,
+                NearToken::from_near(10_000).as_yoctonear()
+            );
+
+            while worker.view_block().await?.timestamp() < start_date {
+                worker.fast_forward(5).await?;
+            }
+
+            let farm = view::get_farm(&pool_contract, 0).await?;
+            assert!(farm.active);
+            assert!(farm.start_date.0 < worker.view_block().await?.timestamp());
+            worker.fast_forward(5).await?;
+
+            call::claim(&council, pool_contract.id(), contract.id()).await?;
+            let unclaimed = view::get_unclaimed_reward(&pool_contract, council.id(), 0).await?;
+            assert!(unclaimed.0 > 0);
+            assert!(unclaimed.0 < shares);
+            let balance = view::ft_balance_of(&contract, council.id()).await?;
+            assert!(balance.0 > 0);
+            assert!(balance.0 < shares);
+            let balance = view::ft_balance_of(&contract, pool_contract.id()).await?;
+            assert!(balance.0 > 0);
+            assert!(balance.0 < shares);
+
+            let (burnt_shares, _) = call::burn(&council, contract.id()).await?;
+            assert!(burnt_shares.0 > 0);
+            let balance_0 = view::ft_balance_of(&token_contracts[0], council.id()).await?;
+            let balance_1 = view::ft_balance_of(&token_contracts[1], council.id()).await?;
+            let balance_2 = view::ft_balance_of(&token_contracts[2], council.id()).await?;
+            assert_eq!(balance_2.0, 0);
+            assert_eq!(balance_0.0 / 2, balance_1.0);
+
+            // mint more shares with different tokens
+            try_join_all(token_contracts.iter().cloned().enumerate().map(
+                |(index, token_contract)| {
+                    let council = council.clone();
+                    let contract = contract.clone();
+                    let dao_contract = dao_contract.clone();
+                    tokio::spawn(async move {
+                        if index == 0 {
+                            return anyhow::Ok(());
+                        }
+                        let mint_amount = if index == 2 {
+                            mint_amount
+                        } else {
+                            mint_amount / 2
+                        };
+                        let (proposal_id, _) = call::propose_deposit_tokens(
+                            &council,
+                            dao_contract.id(),
+                            token_contract.id(),
+                            contract.id(),
+                            mint_amount,
+                        )
+                        .await?;
+                        call::act_proposal(
+                            &council,
+                            dao_contract.id(),
+                            proposal_id,
+                            Action::VoteApprove,
+                        )
+                        .await?;
+                        anyhow::Ok(())
+                    })
+                },
+            ))
+            .await?;
+
+            let (proposal_id, _) =
+                call::propose_mint_shares(&council, dao_contract.id(), contract.id(), shares)
+                    .await?;
+            call::act_proposal(
+                &council,
+                dao_contract.id(),
+                proposal_id,
+                Action::VoteApprove,
+            )
+            .await?;
+
+            let old_farm = farm;
+            let block = worker.view_block().await?;
+            let end_date = block.timestamp() + 1_000_000_000 * 60 * 5; // 5min
+            let (proposal_id, _) = call::propose_update_farm(
+                &council,
+                dao_contract.id(),
+                contract.id(),
+                pool_contract.id(),
+                shares,
+                "Dogshit".to_string(),
+                end_date,
+                0,
+            )
+            .await?;
+            call::act_proposal(
+                &council,
+                dao_contract.id(),
+                proposal_id,
+                Action::VoteApprove,
+            )
+            .await?;
+
+            let farm = view::get_farm(&pool_contract, 0).await?;
+            assert!(farm.active);
+            assert!(farm.start_date.0 > old_farm.start_date.0);
+            assert!(farm.end_date.0 > old_farm.end_date.0);
+            assert!(farm.amount.0 > shares);
+            assert!(farm.amount.0 < 2 * shares);
+
+            call::claim(&council, pool_contract.id(), contract.id()).await?;
+
+            let (burnt_shares, _) = call::burn(&council, contract.id()).await?;
+            assert!(burnt_shares.0 > 0);
+            let balance_0 = view::ft_balance_of(&token_contracts[0], council.id()).await?;
+            let balance_1 = view::ft_balance_of(&token_contracts[1], council.id()).await?;
+            let balance_2 = view::ft_balance_of(&token_contracts[2], council.id()).await?;
+            assert!(balance_2.0 > 0);
+            assert!(balance_0.0 > balance_1.0);
+            assert!(balance_1.0 > balance_2.0);
+
+            while worker.view_block().await?.timestamp() < end_date {
+                worker.fast_forward(5).await?;
+            }
+
+            call::claim(&council, pool_contract.id(), contract.id()).await?;
+
+            let (burnt_shares, _) = call::burn(&council, contract.id()).await?;
+            assert!(burnt_shares.0 > 0);
+            let balance_0 = view::ft_balance_of(&token_contracts[0], council.id()).await?;
+            let balance_1 = view::ft_balance_of(&token_contracts[1], council.id()).await?;
+            let balance_2 = view::ft_balance_of(&token_contracts[2], council.id()).await?;
+            assert!(balance_0.0 > mint_amount * 99 / 100);
+            assert!(balance_1.0 > mint_amount * 99 / 100);
+            assert!(balance_2.0 > mint_amount * 99 / 100);
+
+            anyhow::Ok(())
+        })
+        .await;
+    chain.kill()?;
+    match thread {
+        Err(err) => Err(anyhow::anyhow!(err)),
+        Ok(Err(err)) => Err(anyhow::anyhow!(err)),
+        Ok(_) => anyhow::Ok(()),
+    }
+}
+
+#[tokio::test]
+async fn test_refresh_rewards_when_inactive() -> anyhow::Result<()> {
+    let mut chain = initialize_blockchain().await?;
+
+    let thread =
+        tokio::spawn(async {
+            let Init {
+                worker,
+                council,
+                contract,
+                dao_contract,
+                pool_contract,
+                token_contracts,
+                ..
+            } = initialize_contracts().await?;
+
+            let mint_amount = 1_000_000;
+
+            let (proposal_id, _) = call::propose_add_authorized_farm_token(
+                &council,
+                dao_contract.id(),
+                pool_contract.id(),
+                contract.id(),
+            )
+            .await?;
+            call::act_proposal(
+                &council,
+                dao_contract.id(),
+                proposal_id,
+                Action::VoteApprove,
+            )
+            .await?;
+
+            try_join_all(token_contracts.iter().cloned().enumerate().map(
+                |(index, token_contract)| {
+                    let council = council.clone();
+                    let contract = contract.clone();
+                    let dao_contract = dao_contract.clone();
+                    tokio::spawn(async move {
+                        call::storage_deposit(&token_contract, &council, None, None).await?;
+                        call::storage_deposit(&token_contract, &council, Some(contract.id()), None)
+                            .await?;
+                        call::storage_deposit(
+                            &token_contract,
+                            &council,
+                            Some(dao_contract.id()),
+                            None,
+                        )
+                        .await?;
+                        call::mint_tokens(&token_contract, dao_contract.id(), mint_amount).await?;
+
+                        if index == 2 {
+                            return anyhow::Ok(());
+                        }
+                        let mint_amount = if index == 0 {
+                            mint_amount
+                        } else {
+                            mint_amount / 2
+                        };
+                        let (proposal_id, _) = call::propose_deposit_tokens(
+                            &council,
+                            dao_contract.id(),
+                            token_contract.id(),
+                            contract.id(),
+                            mint_amount,
+                        )
+                        .await?;
+                        call::act_proposal(
+                            &council,
+                            dao_contract.id(),
+                            proposal_id,
+                            Action::VoteApprove,
+                        )
+                        .await?;
+                        anyhow::Ok(())
+                    })
+                },
+            ))
+            .await?;
+
+            // Dogshit has same amount of decimals as NEAR
+            // WARNING: the staking-farm contract doesn't work, if too few tokens are added for distribution
+            let shares = NearToken::from_near(1).as_yoctonear();
+
+            let (proposal_id, _) =
+                call::propose_mint_shares(&council, dao_contract.id(), contract.id(), shares)
+                    .await?;
+            call::act_proposal(
+                &council,
+                dao_contract.id(),
+                proposal_id,
+                Action::VoteApprove,
+            )
+            .await?;
+
+            let total_supply = view::ft_total_supply(&contract).await?;
+            assert_eq!(total_supply.0, shares);
+            let balance = view::ft_balance_of(&contract, dao_contract.id()).await?;
+            assert_eq!(balance.0, shares);
+
+            let block = worker.view_block().await?;
+
+            let start_date = block.timestamp() + 1_000_000_000 * 60; // 1min
+            let end_date = block.timestamp() + 1_000_000_000 * 60 * 5; // 5min
+            let (proposal_id, _) = call::propose_create_farm(
+                &council,
+                dao_contract.id(),
+                contract.id(),
+                pool_contract.id(),
+                shares,
+                "Dogshit".to_string(),
+                start_date,
+                end_date,
+            )
+            .await?;
+            call::act_proposal(
+                &council,
+                dao_contract.id(),
+                proposal_id,
+                Action::VoteApprove,
+            )
+            .await?;
+
+            let total_supply = view::ft_total_supply(&contract).await?;
+            assert_eq!(total_supply.0, shares);
+            let balance = view::ft_balance_of(&contract, dao_contract.id()).await?;
+            assert_eq!(balance.0, 0);
+            let balance = view::ft_balance_of(&contract, pool_contract.id()).await?;
+            assert_eq!(balance.0, shares);
+            let farm = view::get_farm(&pool_contract, 0).await?;
+            assert!(farm.active);
+            assert!(farm.start_date.0 > worker.view_block().await?.timestamp());
+
+            call::deposit_and_stake(&council, pool_contract.id(), NearToken::from_near(10_000))
+                .await?;
+            let account = view::get_account(&pool_contract, council.id()).await?;
+            assert_eq!(
+                account.staked_balance.0,
+                NearToken::from_near(10_000).as_yoctonear()
+            );
+
+            while worker.view_block().await?.timestamp() < start_date {
+                worker.fast_forward(5).await?;
+            }
+
+            let farm = view::get_farm(&pool_contract, 0).await?;
+            assert!(farm.active);
+            assert!(farm.start_date.0 < worker.view_block().await?.timestamp());
+            worker.fast_forward(5).await?;
+
+            call::claim(&council, pool_contract.id(), contract.id()).await?;
+            let unclaimed = view::get_unclaimed_reward(&pool_contract, council.id(), 0).await?;
+            assert!(unclaimed.0 > 0);
+            assert!(unclaimed.0 < shares);
+            let balance = view::ft_balance_of(&contract, council.id()).await?;
+            assert!(balance.0 > 0);
+            assert!(balance.0 < shares);
+            let balance = view::ft_balance_of(&contract, pool_contract.id()).await?;
+            assert!(balance.0 > 0);
+            assert!(balance.0 < shares);
+
+            let (burnt_shares, _) = call::burn(&council, contract.id()).await?;
+            assert!(burnt_shares.0 > 0);
+            let balance_0 = view::ft_balance_of(&token_contracts[0], council.id()).await?;
+            let balance_1 = view::ft_balance_of(&token_contracts[1], council.id()).await?;
+            let balance_2 = view::ft_balance_of(&token_contracts[2], council.id()).await?;
+            assert_eq!(balance_2.0, 0);
+            assert_eq!(balance_0.0 / 2, balance_1.0);
+
+            // mint more shares with different tokens
+            try_join_all(token_contracts.iter().cloned().enumerate().map(
+                |(index, token_contract)| {
+                    let council = council.clone();
+                    let contract = contract.clone();
+                    let dao_contract = dao_contract.clone();
+                    tokio::spawn(async move {
+                        if index == 0 {
+                            return anyhow::Ok(());
+                        }
+                        let mint_amount = if index == 2 {
+                            mint_amount
+                        } else {
+                            mint_amount / 2
+                        };
+                        let (proposal_id, _) = call::propose_deposit_tokens(
+                            &council,
+                            dao_contract.id(),
+                            token_contract.id(),
+                            contract.id(),
+                            mint_amount,
+                        )
+                        .await?;
+                        call::act_proposal(
+                            &council,
+                            dao_contract.id(),
+                            proposal_id,
+                            Action::VoteApprove,
+                        )
+                        .await?;
+                        anyhow::Ok(())
+                    })
+                },
+            ))
+            .await?;
+
+            let (proposal_id, _) =
+                call::propose_mint_shares(&council, dao_contract.id(), contract.id(), shares)
+                    .await?;
+            call::act_proposal(
+                &council,
+                dao_contract.id(),
+                proposal_id,
+                Action::VoteApprove,
+            )
+            .await?;
+
+            while worker.view_block().await?.timestamp() < end_date {
+                worker.fast_forward(5).await?;
+            }
+            call::claim(&council, pool_contract.id(), contract.id()).await?;
+            let old_farm = view::get_farm(&pool_contract, 0).await?;
+
+            let block = worker.view_block().await?;
+            let end_date = block.timestamp() + 1_000_000_000 * 60 * 5; // 5min
+            let (proposal_id, _) = call::propose_update_farm(
+                &council,
+                dao_contract.id(),
+                contract.id(),
+                pool_contract.id(),
+                shares,
+                "Dogshit".to_string(),
+                end_date,
+                0,
+            )
+            .await?;
+            call::act_proposal(
+                &council,
+                dao_contract.id(),
+                proposal_id,
+                Action::VoteApprove,
+            )
+            .await?;
+
+            let farm = view::get_farm(&pool_contract, 0).await?;
+            assert!(farm.active);
+            assert!(farm.start_date.0 > old_farm.start_date.0);
+            assert!(farm.end_date.0 > old_farm.end_date.0);
+            assert_eq!(farm.amount.0, shares);
+
+            while worker.view_block().await?.timestamp() < end_date {
+                worker.fast_forward(5).await?;
+            }
+
+            call::claim(&council, pool_contract.id(), contract.id()).await?;
+
+            let (burnt_shares, _) = call::burn(&council, contract.id()).await?;
+            assert!(burnt_shares.0 > 0);
+            let balance_0 = view::ft_balance_of(&token_contracts[0], council.id()).await?;
+            let balance_1 = view::ft_balance_of(&token_contracts[1], council.id()).await?;
+            let balance_2 = view::ft_balance_of(&token_contracts[2], council.id()).await?;
+            assert!(balance_0.0 > mint_amount * 99 / 100);
+            assert!(balance_1.0 > mint_amount * 99 / 100);
+            assert!(balance_2.0 > mint_amount * 99 / 100);
+
+            anyhow::Ok(())
+        })
+        .await;
+    chain.kill()?;
+    match thread {
+        Err(err) => Err(anyhow::anyhow!(err)),
+        Ok(Err(err)) => Err(anyhow::anyhow!(err)),
+        Ok(_) => anyhow::Ok(()),
+    }
+}

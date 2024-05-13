@@ -1,5 +1,6 @@
 use crate::{Contract, ContractExt};
 use near_sdk::{json_types::U128, near_bindgen, AccountId};
+use primitive_types::U256;
 
 #[near_bindgen]
 impl Contract {
@@ -18,6 +19,18 @@ impl Contract {
         self.deposits
             .iter()
             .map(|(token_id, amount)| (token_id.clone(), U128(*amount)))
+            .collect()
+    }
+
+    pub fn simulate_burn(&self, shares: U128) -> Vec<(AccountId, U128)> {
+        self.rewards
+            .iter()
+            .map(|(token_id, deposit)| {
+                let amount = (U256::from(shares.0) * U256::from(*deposit)
+                    / U256::from(self.shares))
+                .as_u128();
+                (token_id.clone(), U128(amount))
+            })
             .collect()
     }
 }

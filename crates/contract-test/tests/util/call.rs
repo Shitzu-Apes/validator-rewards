@@ -203,6 +203,52 @@ pub async fn propose_create_farm(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
+pub async fn propose_update_farm(
+    sender: &Account,
+    dao: &AccountId,
+    token_id: &AccountId,
+    receiver_id: &AccountId,
+    amount: u128,
+    name: String,
+    end_date: u64,
+    farm_id: u64,
+) -> anyhow::Result<(u64, Vec<ContractEvent>)> {
+    add_proposal(
+        "propose_update_farm",
+        sender,
+        dao,
+        ProposalInput {
+            description: "".to_string(),
+            kind: ProposalKind::FunctionCall {
+                receiver_id: token_id.clone(),
+                actions: vec![ActionCall {
+                    method_name: "ft_transfer_call".to_string(),
+                    args: Base64VecU8::from(
+                        json!({
+                            "receiver_id": receiver_id,
+                            "amount": U128(amount),
+                            "msg": serde_json::to_string(&FarmingDetails {
+                                name: Some(name),
+                                start_date: None,
+                                end_date: end_date.into(),
+                                farm_id: Some(farm_id)
+                            })?
+                        })
+                        .to_string()
+                        .as_bytes()
+                        .to_vec(),
+                    ),
+                    deposit: NearToken::from_yoctonear(1),
+                    gas: Gas::from_tgas(80),
+                }],
+            },
+        },
+        NearToken::from_near(1),
+    )
+    .await
+}
+
 pub async fn new_dao(
     contract: &Contract,
     config: DaoConfig,
