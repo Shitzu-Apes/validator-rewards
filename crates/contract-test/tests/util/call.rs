@@ -49,7 +49,6 @@ pub async fn mint_tokens(
     Ok(res)
 }
 
-#[allow(clippy::too_many_arguments)]
 pub async fn propose_add_authorized_farm_token(
     sender: &Account,
     dao: &AccountId,
@@ -84,7 +83,6 @@ pub async fn propose_add_authorized_farm_token(
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
 pub async fn propose_deposit_tokens(
     sender: &Account,
     dao: &AccountId,
@@ -122,7 +120,6 @@ pub async fn propose_deposit_tokens(
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
 pub async fn propose_mint_shares(
     sender: &Account,
     dao: &AccountId,
@@ -249,6 +246,32 @@ pub async fn propose_update_farm(
     .await
 }
 
+pub async fn propose_burn(
+    sender: &Account,
+    dao: &AccountId,
+    contract_id: &AccountId,
+) -> anyhow::Result<(u64, Vec<ContractEvent>)> {
+    add_proposal(
+        "propose_burn",
+        sender,
+        dao,
+        ProposalInput {
+            description: "".to_string(),
+            kind: ProposalKind::FunctionCall {
+                receiver_id: contract_id.clone(),
+                actions: vec![ActionCall {
+                    method_name: "burn".to_string(),
+                    args: Base64VecU8::from(vec![]),
+                    deposit: NearToken::from_yoctonear(1),
+                    gas: Gas::from_tgas(150),
+                }],
+            },
+        },
+        NearToken::from_near(1),
+    )
+    .await
+}
+
 pub async fn new_dao(
     contract: &Contract,
     config: DaoConfig,
@@ -349,6 +372,23 @@ pub async fn burn(
             .await?,
     )?;
     Ok((res.json()?, events))
+}
+
+pub async fn nft_mint(
+    sender: &Account,
+    nft: &AccountId,
+    quantity: u32,
+) -> anyhow::Result<(ExecutionResult<Value>, Vec<ContractEvent>)> {
+    log_tx_result(
+        "Nft: mint",
+        sender
+            .call(nft, "nft_mint")
+            .args_json((quantity,))
+            .deposit(NearToken::from_near(5))
+            .max_gas()
+            .transact()
+            .await?,
+    )
 }
 
 // async fn ft_transfer_call<T: Serialize>(

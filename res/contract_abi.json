@@ -18,7 +18,7 @@
         "result": {
           "serialization_type": "json",
           "type_schema": {
-            "type": "string"
+            "$ref": "#/definitions/PromiseOrValueString"
           }
         }
       },
@@ -314,6 +314,12 @@
               }
             },
             {
+              "name": "shitzu_nft",
+              "type_schema": {
+                "$ref": "#/definitions/AccountId"
+              }
+            },
+            {
               "name": "token_whitelist",
               "type_schema": {
                 "type": "array",
@@ -323,6 +329,38 @@
               }
             }
           ]
+        }
+      },
+      {
+        "name": "on_burn",
+        "kind": "call",
+        "modifiers": [
+          "private"
+        ],
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "sender_id",
+              "type_schema": {
+                "$ref": "#/definitions/AccountId"
+              }
+            }
+          ]
+        },
+        "callbacks": [
+          {
+            "serialization_type": "json",
+            "type_schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
         }
       },
       {

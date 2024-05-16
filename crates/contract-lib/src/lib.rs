@@ -23,13 +23,20 @@ use near_sdk::{
     store::{Lazy, TreeMap, UnorderedMap},
     AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault, PromiseOrValue,
 };
-use near_sdk::{serde_json, PromiseResult};
+use near_sdk::{ext_contract, serde_json, PromiseResult};
 use primitive_types::U256;
 
 const GAS_FOR_BURN: Gas = Gas::from_tgas(5);
+const GAS_FOR_NFT_CHECK: Gas = Gas::from_tgas(5);
 const GAS_FOR_FT_TRANSFER: Gas = Gas::from_tgas(10);
 const GAS_FOR_FT_TRANSFER_CALL: Gas = Gas::from_tgas(60);
 const GAS_FOR_RESOLVE_TRANSFER: Gas = Gas::from_tgas(5);
+
+#[ext_contract(shitzu_nft)]
+#[allow(dead_code)]
+trait ShitzuNft {
+    fn nft_supply_for_owner(&mut self, account_id: AccountId) -> u32;
+}
 
 #[derive(BorshStorageKey, BorshSerialize)]
 #[borsh(crate = "near_sdk::borsh")]
@@ -47,6 +54,7 @@ pub enum StorageKey {
 pub struct Contract {
     owner: AccountId,
     validator: AccountId,
+    shitzu_nft: AccountId,
     accounts: TreeMap<AccountId, u128>,
     deposits: UnorderedMap<AccountId, u128>,
     rewards: UnorderedMap<AccountId, u128>,
@@ -57,12 +65,20 @@ pub struct Contract {
 #[near_bindgen]
 impl Contract {
     #[init]
-    pub fn new(owner: AccountId, validator: AccountId, token_whitelist: Vec<AccountId>) -> Self {
+    pub fn new(
+        owner: AccountId,
+        validator: AccountId,
+        shitzu_nft: AccountId,
+        token_whitelist: Vec<AccountId>,
+    ) -> Self {
+        let mut accounts = TreeMap::new(StorageKey::Accounts);
+        accounts.insert(owner.clone(), 0);
         #[allow(deprecated)]
         Self {
             owner,
             validator,
-            accounts: TreeMap::new(StorageKey::Accounts),
+            shitzu_nft,
+            accounts,
             deposits: UnorderedMap::new(StorageKey::Deposits),
             rewards: UnorderedMap::new(StorageKey::Rewards),
             shares: 0,
@@ -71,11 +87,13 @@ impl Contract {
     }
 
     #[payable]
-    pub fn burn(&mut self) -> U128 {
+    pub fn burn(&mut self) -> PromiseOrValue<U128> {
         assert_one_yocto();
         require!(
             env::prepaid_gas()
                 >= GAS_FOR_BURN
+                    .checked_add(GAS_FOR_NFT_CHECK)
+                    .unwrap()
                     .checked_add(
                         GAS_FOR_FT_TRANSFER
                             .checked_mul(self.rewards.len() as u64)
@@ -86,7 +104,57 @@ impl Contract {
         );
         let sender_id = env::predecessor_account_id();
 
-        let balance = self.accounts.remove(&sender_id).unwrap();
+        require!(
+            self.accounts.contains_key(&sender_id),
+            "Account has no tokens"
+        );
+
+        if sender_id == self.owner {
+            let balance = self.accounts.remove(&sender_id).unwrap();
+
+            for (token_id, deposit) in self.rewards.iter_mut() {
+                let amount = (U256::from(balance) * U256::from(*deposit) / U256::from(self.shares))
+                    .as_u128();
+                *deposit -= amount;
+                ext_ft_core::ext(token_id.clone())
+                    .with_unused_gas_weight(1)
+                    .with_attached_deposit(NearToken::from_yoctonear(1))
+                    .ft_transfer(sender_id.clone(), amount.into(), None);
+            }
+            self.shares -= balance;
+
+            FtBurn {
+                owner_id: &sender_id,
+                amount: balance.into(),
+                memo: None,
+            }
+            .emit();
+
+            PromiseOrValue::Value(U128(balance))
+        } else {
+            PromiseOrValue::Promise(
+                shitzu_nft::ext(self.shitzu_nft.clone())
+                    .with_static_gas(GAS_FOR_NFT_CHECK)
+                    .nft_supply_for_owner(env::predecessor_account_id())
+                    .then(
+                        Self::ext(env::current_account_id())
+                            .with_unused_gas_weight(1)
+                            .on_burn(sender_id),
+                    ),
+            )
+        }
+    }
+
+    #[private]
+    pub fn on_burn(&mut self, sender_id: AccountId, #[callback_unwrap] nft_amount: U128) -> U128 {
+        let mut balance = self.accounts.remove(&sender_id).unwrap();
+
+        if nft_amount.0 == 0 {
+            let owner_refund = balance / 5;
+            balance -= owner_refund;
+            let owner_balance = self.accounts.get_mut(&self.owner).unwrap();
+            *owner_balance += owner_refund;
+        }
 
         for (token_id, deposit) in self.rewards.iter_mut() {
             let amount =

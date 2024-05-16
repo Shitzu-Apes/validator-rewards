@@ -134,6 +134,7 @@ pub struct Init {
     pub contract: Contract,
     pub dao_contract: Contract,
     pub pool_contract: Contract,
+    pub nft_contract: Contract,
     pub token_contracts: Vec<Contract>,
 }
 
@@ -229,6 +230,28 @@ pub async fn initialize_contracts() -> anyhow::Result<Init> {
             .await?,
     )?;
 
+    let nft_contract = near
+        .create_subaccount("nft")
+        .initial_balance(NearToken::from_near(100_000))
+        .transact()
+        .await?
+        .into_result()?
+        .deploy(&fs::read("../../res/shitzu_nft.wasm").await?)
+        .await?
+        .into_result()?;
+    log_tx_result(
+        "Nft: new",
+        nft_contract
+            .call("new_init")
+            .args_json(json!({
+                "owner_id": dao_contract.id(),
+                "icon": ""
+            }))
+            .max_gas()
+            .transact()
+            .await?,
+    )?;
+
     let token_contracts: Vec<_> = join_all((0..3).map(|i| {
         let near = near.clone();
         tokio::spawn(async move {
@@ -265,6 +288,7 @@ pub async fn initialize_contracts() -> anyhow::Result<Init> {
             .args_json((
                 dao_contract.id(),
                 pool_contract.id(),
+                nft_contract.id(),
                 token_contracts
                     .iter()
                     .map(|contract| contract.id())
@@ -282,6 +306,7 @@ pub async fn initialize_contracts() -> anyhow::Result<Init> {
         contract,
         dao_contract,
         pool_contract,
+        nft_contract,
         token_contracts,
     })
 }
