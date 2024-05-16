@@ -20,6 +20,7 @@ use near_workspaces::{
 };
 use owo_colors::OwoColorize;
 use std::{
+    io::ErrorKind,
     ops::{Deref, DerefMut},
     path::PathBuf,
     process,
@@ -163,9 +164,21 @@ impl DerefMut for NeardProcess {
 
 pub async fn initialize_blockchain() -> anyhow::Result<NeardProcess> {
     let neard = NeardProcess(
-        process::Command::new("../../res/near-sandbox")
+        match process::Command::new("near-sandbox")
             .args(["--home", "../../.near", "run"])
-            .spawn()?,
+            .spawn()
+        {
+            Ok(process) => process,
+            Err(err) => {
+                if let ErrorKind::NotFound = err.kind() {
+                    process::Command::new("../../bin/near-sandbox")
+                        .args(["--home", "../../.near", "run"])
+                        .spawn()?
+                } else {
+                    panic!("{}", err);
+                }
+            }
+        },
     );
     sleep(Duration::from_secs(8)).await;
     Ok(neard)
