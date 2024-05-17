@@ -166,7 +166,7 @@ async fn test_basic_reward_distribution() -> anyhow::Result<()> {
         let total_supply = view::ft_total_supply(&contract).await?;
         let burnt_shares = shares - total_supply.0;
         for (_, amount) in rewards {
-            let distributed = burnt_shares * mint_amount / shares;
+            let distributed = (burnt_shares * mint_amount) / shares;
             assert_eq!(amount.0, mint_amount - distributed);
             for token_contract in &token_contracts {
                 let balance = view::ft_balance_of(token_contract, council.id()).await?;
@@ -193,7 +193,7 @@ async fn test_basic_reward_distribution() -> anyhow::Result<()> {
         let total_supply = view::ft_total_supply(&contract).await?;
         let burnt_shares = shares - total_supply.0;
         for (_, amount) in rewards {
-            let distributed = burnt_shares * mint_amount / shares;
+            let distributed = (burnt_shares * mint_amount) / shares;
             assert!(amount.0 < mint_amount / 100);
             for token_contract in &token_contracts {
                 let balance = view::ft_balance_of(token_contract, council.id()).await?;
@@ -420,7 +420,7 @@ async fn test_multiple_users_reward_distribution() -> anyhow::Result<()> {
         let total_supply = view::ft_total_supply(&contract).await?;
         let burnt_shares = shares - total_supply.0;
         for (_, amount) in rewards {
-            let distributed = burnt_shares * mint_amount / shares;
+            let distributed = (burnt_shares * mint_amount) / shares;
             assert_eq!(amount.0, mint_amount - distributed);
             for token_contract in &token_contracts {
                 let balance_a = view::ft_balance_of(token_contract, user_a.id()).await?;
@@ -459,7 +459,7 @@ async fn test_multiple_users_reward_distribution() -> anyhow::Result<()> {
         let total_supply = view::ft_total_supply(&contract).await?;
         let burnt_shares = shares - total_supply.0;
         for (_, amount) in rewards {
-            let distributed = burnt_shares * mint_amount / shares;
+            let distributed = (burnt_shares * mint_amount) / shares;
             assert!(amount.0 < mint_amount / 100);
             for token_contract in &token_contracts {
                 let balance_a = view::ft_balance_of(token_contract, user_a.id()).await?;
@@ -1205,7 +1205,7 @@ async fn test_no_nft_penalty() -> anyhow::Result<()> {
         let total_supply = view::ft_total_supply(&contract).await?;
         let burnt_shares = shares - total_supply.0;
         for (_, amount) in rewards {
-            let distributed = burnt_shares * mint_amount / shares;
+            let distributed = (burnt_shares * mint_amount) / shares;
             assert_eq!(amount.0, mint_amount - distributed);
             for token_contract in &token_contracts {
                 let balance = view::ft_balance_of(token_contract, council.id()).await?;
@@ -1234,7 +1234,7 @@ async fn test_no_nft_penalty() -> anyhow::Result<()> {
         let total_supply = view::ft_total_supply(&contract).await?;
         let burnt_shares = shares - total_supply.0;
         for (_, amount) in rewards {
-            let distributed = burnt_shares * mint_amount / shares;
+            let distributed = (burnt_shares * mint_amount) / shares;
             assert!(amount.0 < mint_amount * 21 / 100);
             for token_contract in &token_contracts {
                 let balance = view::ft_balance_of(token_contract, council.id()).await?;
