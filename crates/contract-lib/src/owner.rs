@@ -41,6 +41,7 @@ impl Contract {
 
     pub fn mint(&mut self, shares: U128) {
         self.require_owner();
+        require!(!self.deposits.is_empty(), "No tokens have been deposited");
         self.shares += shares.0;
         self.accounts.insert(self.owner.clone(), self.shares);
         for (token_id, amount) in self.deposits.drain() {
