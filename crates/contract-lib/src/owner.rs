@@ -59,6 +59,11 @@ impl Contract {
         .emit();
     }
 
+    pub fn set_rewarder(&mut self, rewarder: AccountId) {
+        self.require_owner();
+        self.rewarder = rewarder;
+    }
+
     #[private]
     pub fn migrate(&mut self) {
         // add migration here if needed

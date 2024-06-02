@@ -11,6 +11,7 @@ use near_contract_standards::{
         receiver::{ext_ft_receiver, FungibleTokenReceiver},
         FungibleTokenCore, FungibleTokenResolver,
     },
+    non_fungible_token::TokenId,
     storage_management::{StorageBalance, StorageBalanceBounds, StorageManagement},
 };
 #[allow(deprecated)]
@@ -38,6 +39,12 @@ trait ShitzuNft {
     fn nft_supply_for_owner(&mut self, account_id: AccountId) -> u32;
 }
 
+#[ext_contract(rewarder)]
+#[allow(dead_code)]
+trait Rewarder {
+    fn primary_nft_of(&mut self, account_id: AccountId) -> Option<(TokenId, U128)>;
+}
+
 #[derive(BorshStorageKey, BorshSerialize)]
 #[borsh(crate = "near_sdk::borsh")]
 pub enum StorageKey {
@@ -54,6 +61,7 @@ pub enum StorageKey {
 pub struct Contract {
     owner: AccountId,
     validator: AccountId,
+    rewarder: AccountId,
     shitzu_nft: AccountId,
     accounts: TreeMap<AccountId, u128>,
     deposits: UnorderedMap<AccountId, u128>,
@@ -69,6 +77,7 @@ impl Contract {
         owner: AccountId,
         validator: AccountId,
         shitzu_nft: AccountId,
+        rewarder: AccountId,
         token_whitelist: Vec<AccountId>,
     ) -> Self {
         let mut accounts = TreeMap::new(StorageKey::Accounts);
@@ -77,6 +86,7 @@ impl Contract {
         Self {
             owner,
             validator,
+            rewarder,
             shitzu_nft,
             accounts,
             deposits: UnorderedMap::new(StorageKey::Deposits),
@@ -132,24 +142,34 @@ impl Contract {
 
             PromiseOrValue::Value(U128(balance))
         } else {
+            let nft_owner_promise = shitzu_nft::ext(self.shitzu_nft.clone())
+                .with_static_gas(GAS_FOR_NFT_CHECK)
+                .nft_supply_for_owner(env::predecessor_account_id());
+
+            let nft_stake_promise = rewarder::ext(self.owner.clone())
+                .with_static_gas(GAS_FOR_NFT_CHECK)
+                .primary_nft_of(env::predecessor_account_id());
+
             PromiseOrValue::Promise(
-                shitzu_nft::ext(self.shitzu_nft.clone())
-                    .with_static_gas(GAS_FOR_NFT_CHECK)
-                    .nft_supply_for_owner(env::predecessor_account_id())
-                    .then(
-                        Self::ext(env::current_account_id())
-                            .with_unused_gas_weight(1)
-                            .on_burn(sender_id),
-                    ),
+                nft_owner_promise.and(nft_stake_promise).then(
+                    Self::ext(env::current_account_id())
+                        .with_unused_gas_weight(1)
+                        .on_burn(sender_id),
+                ),
             )
         }
     }
 
     #[private]
-    pub fn on_burn(&mut self, sender_id: AccountId, #[callback_unwrap] nft_amount: U128) -> U128 {
+    pub fn on_burn(
+        &mut self,
+        sender_id: AccountId,
+        #[callback_unwrap] nft_amount: U128,
+        #[callback_unwrap] primary_nft: Option<(TokenId, U128)>,
+    ) -> U128 {
         let mut balance = self.accounts.remove(&sender_id).unwrap();
 
-        if nft_amount.0 == 0 {
+        if nft_amount.0 == 0 && primary_nft.is_none() {
             let owner_refund = balance / 5;
             balance -= owner_refund;
             let owner_balance = self.accounts.get_mut(&self.owner).unwrap();
