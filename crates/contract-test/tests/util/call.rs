@@ -3,8 +3,9 @@ use crate::{
     Action, ActionCall, ContractEvent, DaoConfig, DaoPolicy, FarmingDetails, ProposalInput,
     ProposalKind,
 };
+use near_contract_standards::non_fungible_token::TokenId;
 use near_sdk::{
-    json_types::{Base64VecU8, U128},
+    json_types::{Base58CryptoHash, Base64VecU8, U128},
     serde_json::{self, json},
     Gas,
 };
@@ -389,6 +390,104 @@ pub async fn nft_mint(
             .transact()
             .await?,
     )
+}
+
+pub async fn stake_nft_with_rewarder(
+    sender: &Account,
+    nft: &AccountId,
+    rewarder: &AccountId,
+    token_id: &TokenId,
+) -> anyhow::Result<(ExecutionResult<Value>, Vec<ContractEvent>)> {
+    log_tx_result(
+        "Nft: stake",
+        sender
+            .call(nft, "nft_transfer_call")
+            .args_json((
+                rewarder,
+                token_id,
+                None::<u64>,
+                None::<String>,
+                "".to_string(),
+            ))
+            .deposit(NearToken::from_near(5))
+            .max_gas()
+            .transact()
+            .await?,
+    )
+}
+
+pub async fn propose_upgrade(
+    sender: &Account,
+    dao: &AccountId,
+    contract: &AccountId,
+    new_code: Vec<u8>,
+) -> anyhow::Result<(u64, Vec<ContractEvent>)> {
+    let result = log_tx_result(
+        "store new code",
+        sender
+            .call(dao, "store_blob")
+            .args(new_code)
+            .deposit(NearToken::from_near(1))
+            .max_gas()
+            .transact()
+            .await?,
+    )
+    .unwrap();
+
+    let hash = result
+        .0
+        .json::<Base58CryptoHash>()
+        .expect("cannot parse hash");
+
+    add_proposal(
+        "propose_upgrade",
+        sender,
+        dao,
+        ProposalInput {
+            description: "".to_string(),
+            kind: ProposalKind::UpgradeRemote {
+                receiver_id: contract.clone(),
+                method_name: "upgrade".into(),
+                hash,
+            },
+        },
+        NearToken::from_near(1),
+    )
+    .await
+}
+
+pub async fn propose_set_rewarder(
+    sender: &Account,
+    dao: &AccountId,
+    contract: &AccountId,
+    rewarder: &AccountId,
+) -> anyhow::Result<(u64, Vec<ContractEvent>)> {
+    add_proposal(
+        "propose_set_rewarder",
+        sender,
+        dao,
+        ProposalInput {
+            description: "".to_string(),
+            kind: ProposalKind::FunctionCall {
+                receiver_id: contract.clone(),
+                actions: vec![ActionCall {
+                    method_name: "set_rewarder".to_string(),
+                    args: Base64VecU8::from(
+                        json!({
+                            "rewarder": rewarder,
+                        })
+                        .to_string()
+                        .as_bytes()
+                        .to_vec(),
+                    ),
+                    deposit: NearToken::from_yoctonear(0),
+                    gas: Gas::from_tgas(30),
+                }],
+            },
+        },
+        NearToken::from_near(1),
+    )
+    .await
 }
 
 // async fn ft_transfer_call<T: Serialize>(
