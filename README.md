@@ -22,5 +22,10 @@ The overall flow via DAO proposals looks like this:
 ## Run tests
 
 The tests are run via [near-sandbox](https://github.com/near/near-sandbox), because this is the only way to have a realistic validator setup.
-You need to locally compile `near-sandbox` and then copy the binary into the `res` folder.
+You need to locally compile `near-sandbox` and then copy the binary into the `res` folder or you can use the prebuilt Docker image:
+
+```sh
+docker run --rm -it -v $(pwd):/app tarnadas/near-sandbox /bin/bash -c "cargo test test_basic_reward_distribution -- --nocapture"
+```
+
 The tests cannot run in parallel, because the sandbox can only be used by one test at the same time.

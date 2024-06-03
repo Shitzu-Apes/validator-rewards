@@ -277,11 +277,12 @@ pub async fn initialize_contracts() -> anyhow::Result<Init> {
         .into_result()?;
     log_tx_result(
         "Rewarder: new",
-        nft_contract
+        rewarder_contract
             .call("new")
             .args_json(json!({
                 "owner": dao_contract.id(),
                 "operator": "operator.near",
+                "whitelisted_record_score_ids": ["contract.near"],
                 "reward_token": "token.0xshitzu.near",
                 "nft": nft_contract.id(),
             }))
@@ -323,15 +324,17 @@ pub async fn initialize_contracts() -> anyhow::Result<Init> {
         "new",
         contract
             .call("new")
-            .args_json((
-                dao_contract.id(),
-                pool_contract.id(),
-                nft_contract.id(),
-                token_contracts
+            .args_json(json!({
+                "owner": dao_contract.id(),
+                "validator": pool_contract.id(),
+                "shitzu_token": token_contracts[0].id(),
+                "shitzu_nft": nft_contract.id(),
+                "rewarder": rewarder_contract.id(),
+                "token_whitelist": token_contracts
                     .iter()
                     .map(|contract| contract.id())
                     .collect::<Vec<_>>(),
-            ))
+            }))
             .max_gas()
             .transact()
             .await?,

@@ -1,4 +1,4 @@
-use crate::{Contract, ContractExt};
+use crate::{Contract, ContractExt, OldContract};
 use near_contract_standards::fungible_token::{core::ext_ft_core, events::FtMint};
 use near_sdk::{env, json_types::U128, near_bindgen, require, AccountId, NearToken, Promise};
 
@@ -59,36 +59,45 @@ impl Contract {
         .emit();
     }
 
-    pub fn set_rewarder(&mut self, rewarder: AccountId) {
-        self.require_owner();
-        self.rewarder = rewarder;
-    }
-
     #[private]
-    pub fn migrate(&mut self) {
-        // add migration here if needed
+    #[init(ignore_state)]
+    pub fn migrate(rewarder: AccountId, shitzu_token: AccountId) -> Self {
+        let contract: OldContract = env::state_read().unwrap();
+
+        Self {
+            owner: contract.owner,
+            validator: contract.validator,
+            rewarder,
+            shitzu_token,
+            shitzu_nft: contract.shitzu_nft,
+            accounts: contract.accounts,
+            deposits: contract.deposits,
+            rewards: contract.rewards,
+            shares: contract.shares,
+            token_whitelist: contract.token_whitelist,
+        }
     }
 
-    pub fn upgrade(&self) -> Promise {
-        self.require_owner();
+    // pub fn upgrade(&self) -> Promise {
+    //     self.require_owner();
 
-        let code = env::input().expect("Error: No input").to_vec();
+    //     let code = env::input().expect("Error: No input").to_vec();
 
-        Promise::new(env::current_account_id())
-            .deploy_contract(code)
-            .as_return()
-    }
+    //     Promise::new(env::current_account_id())
+    //         .deploy_contract(code)
+    //         .as_return()
+    // }
 
-    pub fn upgrade_and_migrate(&self) -> Promise {
-        self.require_owner();
+    // pub fn upgrade_and_migrate(&self) -> Promise {
+    //     self.require_owner();
 
-        let code = env::input().expect("Error: No input").to_vec();
+    //     let code = env::input().expect("Error: No input").to_vec();
 
-        Promise::new(env::current_account_id())
-            .deploy_contract(code)
-            .then(Self::ext(env::current_account_id()).migrate())
-            .as_return()
-    }
+    //     Promise::new(env::current_account_id())
+    //         .deploy_contract(code)
+    //         .then(Self::ext(env::current_account_id()).migrate())
+    //         .as_return()
+    // }
 }
 
 impl Contract {
