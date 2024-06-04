@@ -201,7 +201,7 @@ impl Contract {
                         .then(
                             rewarder::ext(self.rewarder.clone())
                                 .with_unused_gas_weight(1)
-                                .on_track_score(primary_nft.clone(), (amount * 10).into()),
+                                .on_track_score(primary_nft.clone(), (amount * 3).into()),
                         );
                 } else {
                     ext_ft_core::ext(token_id.clone())

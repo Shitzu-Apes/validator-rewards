@@ -189,7 +189,7 @@ async fn test_basic_reward_distribution() -> anyhow::Result<()> {
                     let (_, score) = view::primary_nft_of(&rewarder_contract, council.id())
                         .await?
                         .unwrap();
-                    assert_eq!(score.0, balance.0 * 10);
+                    assert_eq!(score.0, balance.0 * 3);
                 }
             }
         }
@@ -222,7 +222,7 @@ async fn test_basic_reward_distribution() -> anyhow::Result<()> {
                     let (_, score) = view::primary_nft_of(&rewarder_contract, council.id())
                         .await?
                         .unwrap();
-                    assert_eq!(score.0, balance.0 * 10);
+                    assert_eq!(score.0, balance.0 * 3);
                 }
             }
         }
