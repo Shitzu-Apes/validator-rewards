@@ -5,7 +5,12 @@
     "version": "1.0.0",
     "authors": [
       "Mario Reder <mario.reder@pm.me>"
-    ]
+    ],
+    "build": {
+      "compiler": "rustc 1.78.0",
+      "builder": "cargo-near 0.6.2"
+    },
+    "wasm_hash": "Bbg87gLE3aBSnKDYjxFMaVGBAdiMPUJ92P1AGrAAgfMJ"
   },
   "body": {
     "functions": [
@@ -638,6 +643,15 @@
           "description": "NEAR Account Identifier.\n\nThis is a unique, syntactically valid, human-readable account identifier on the NEAR network.\n\n[See the crate-level docs for information about validation.](index.html#account-id-rules)\n\nAlso see [Error kind precedence](AccountId#error-kind-precedence).\n\n## Examples\n\n``` use near_account_id::AccountId;\n\nlet alice: AccountId = \"alice.near\".parse().unwrap();\n\nassert!(\"ƒelicia.near\".parse::<AccountId>().is_err()); // (ƒ is not f) ```",
           "type": "string"
         },
+        "Base64VecU8": {
+          "description": "Helper class to serialize/deserialize `Vec<u8>` to base64 string.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0.0
+          }
+        },
         "FungibleTokenMetadata": {
           "type": "object",
           "required": [
@@ -668,9 +682,13 @@
               ]
             },
             "reference_hash": {
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Base64VecU8"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "spec": {

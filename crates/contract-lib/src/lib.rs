@@ -13,16 +13,16 @@ use near_contract_standards::{
     storage_management::{StorageBalance, StorageBalanceBounds, StorageManagement},
 };
 #[allow(deprecated)]
+use near_sdk::store::UnorderedMap;
 use near_sdk::{
     assert_one_yocto,
     borsh::{BorshDeserialize, BorshSerialize},
-    env,
+    env, ext_contract,
     json_types::U128,
-    near_bindgen, require,
-    store::{Lazy, TreeMap, UnorderedMap},
-    AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault, PromiseOrValue,
+    near_bindgen, require, serde_json,
+    store::{Lazy, TreeMap},
+    AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault, PromiseOrValue, PromiseResult,
 };
-use near_sdk::{ext_contract, serde_json, PromiseResult};
 use primitive_types::U256;
 use std::cmp;
 
@@ -54,7 +54,10 @@ pub enum StorageKey {
     TokenWhitelist,
 }
 
-#[near_bindgen]
+#[near_bindgen(contract_metadata(
+    link = "https://github.com/Shitzu-Apes/validator-rewards",
+    standard(standard = "148", version = "1.0.0")
+))]
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault)]
 #[borsh(crate = "near_sdk::borsh")]
 #[allow(deprecated)]
@@ -198,7 +201,7 @@ impl Contract {
                         .then(
                             rewarder::ext(self.rewarder.clone())
                                 .with_unused_gas_weight(1)
-                                .on_track_score(primary_nft.clone(), amount.into()),
+                                .on_track_score(primary_nft.clone(), (amount * 10).into()),
                         );
                 } else {
                     ext_ft_core::ext(token_id.clone())
