@@ -229,6 +229,52 @@ async fn test_basic_reward_distribution() -> anyhow::Result<()> {
         let balance = view::ft_balance_of(&contract, council.id()).await?;
         assert!(balance.0 == 0);
 
+        let mut old_rewards = view::get_undistributed_rewards(&contract).await?;
+        old_rewards.sort_by_key(|reward: &(near_sdk::AccountId, U128)| reward.0.clone());
+        let (proposal_id, _) = call::propose_withdraw_reward(
+            &council,
+            dao_contract.id(),
+            contract.id(),
+            &old_rewards[0].0,
+            old_rewards[0].1 .0 / 2,
+        )
+        .await?;
+        call::act_proposal(
+            &council,
+            dao_contract.id(),
+            proposal_id,
+            Action::VoteApprove,
+        )
+        .await?;
+        let (proposal_id, _) = call::propose_withdraw_reward(
+            &council,
+            dao_contract.id(),
+            contract.id(),
+            &old_rewards[1].0,
+            old_rewards[1].1 .0,
+        )
+        .await?;
+        call::act_proposal(
+            &council,
+            dao_contract.id(),
+            proposal_id,
+            Action::VoteApprove,
+        )
+        .await?;
+
+        let mut rewards = view::get_undistributed_rewards(&contract).await?;
+        rewards.sort_by_key(|reward: &(near_sdk::AccountId, U128)| reward.0.clone());
+        assert_eq!(
+            rewards,
+            vec![
+                (
+                    token_contracts[0].id().clone(),
+                    U128(old_rewards[0].1 .0 - old_rewards[0].1 .0 / 2)
+                ),
+                (token_contracts[2].id().clone(), U128(old_rewards[2].1 .0))
+            ]
+        );
+
         anyhow::Ok(())
     })
     .await;

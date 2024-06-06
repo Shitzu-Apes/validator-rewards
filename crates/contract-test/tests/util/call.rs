@@ -273,6 +273,42 @@ pub async fn propose_burn(
     .await
 }
 
+pub async fn propose_withdraw_reward(
+    sender: &Account,
+    dao: &AccountId,
+    contract_id: &AccountId,
+    token_id: &AccountId,
+    amount: u128,
+) -> anyhow::Result<(u64, Vec<ContractEvent>)> {
+    add_proposal(
+        "propose_withdraw_reward",
+        sender,
+        dao,
+        ProposalInput {
+            description: "".to_string(),
+            kind: ProposalKind::FunctionCall {
+                receiver_id: contract_id.clone(),
+                actions: vec![ActionCall {
+                    method_name: "withdraw_reward".to_string(),
+                    args: Base64VecU8::from(
+                        json!({
+                            "token_id": token_id,
+                            "amount": U128(amount)
+                        })
+                        .to_string()
+                        .as_bytes()
+                        .to_vec(),
+                    ),
+                    deposit: NearToken::from_yoctonear(0),
+                    gas: Gas::from_tgas(50),
+                }],
+            },
+        },
+        NearToken::from_near(1),
+    )
+    .await
+}
+
 pub async fn new_dao(
     contract: &Contract,
     config: DaoConfig,

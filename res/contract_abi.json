@@ -10,7 +10,7 @@
       "compiler": "rustc 1.78.0",
       "builder": "cargo-near 0.6.2"
     },
-    "wasm_hash": "FZfcXf6GDdEERFZRjfiPBK4dbVHQVbLQQtvzTBY1rr1N"
+    "wasm_hash": "BnSzbR5CuzTKpBseyRvDaczh8Y5PuuVo6xmnKg3VBLV4"
   },
   "body": {
     "functions": [
@@ -608,6 +608,33 @@
       },
       {
         "name": "withdraw",
+        "kind": "call",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "token_id",
+              "type_schema": {
+                "$ref": "#/definitions/AccountId"
+              }
+            },
+            {
+              "name": "amount",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/Promise"
+          }
+        }
+      },
+      {
+        "name": "withdraw_reward",
         "kind": "call",
         "params": {
           "serialization_type": "json",

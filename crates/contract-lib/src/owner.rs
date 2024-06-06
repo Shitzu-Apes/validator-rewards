@@ -39,6 +39,19 @@ impl Contract {
             .ft_transfer(self.owner.clone(), amount, None)
     }
 
+    pub fn withdraw_reward(&mut self, token_id: AccountId, amount: U128) -> Promise {
+        self.require_owner();
+        let reward = self.rewards.get_mut(&token_id).unwrap();
+        *reward -= amount.0;
+        if *reward == 0 {
+            self.rewards.remove(&token_id);
+        }
+        ext_ft_core::ext(token_id)
+            .with_unused_gas_weight(1)
+            .with_attached_deposit(NearToken::from_yoctonear(1))
+            .ft_transfer(self.owner.clone(), amount, None)
+    }
+
     pub fn mint(&mut self, shares: U128) {
         self.require_owner();
         require!(!self.deposits.is_empty(), "No tokens have been deposited");
