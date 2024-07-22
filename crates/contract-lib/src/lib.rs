@@ -186,6 +186,14 @@ impl Contract {
             balance -= owner_refund;
             let owner_balance = self.accounts.get_mut(&self.owner).unwrap();
             *owner_balance += owner_refund;
+
+            FtTransfer {
+                old_owner_id: &sender_id,
+                new_owner_id: &self.owner,
+                amount: owner_refund.into(),
+                memo: None,
+            }
+            .emit();
         }
 
         for (token_id, deposit) in self.rewards.iter_mut() {

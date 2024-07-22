@@ -1,5 +1,8 @@
-use crate::{Contract, ContractExt, OldContract};
-use near_contract_standards::fungible_token::{core::ext_ft_core, events::FtMint};
+use crate::{Contract, ContractExt};
+use near_contract_standards::fungible_token::{
+    core::ext_ft_core,
+    events::{FtBurn, FtMint},
+};
 use near_sdk::{env, json_types::U128, near_bindgen, require, AccountId, NearToken, Promise};
 
 #[near_bindgen]
@@ -55,8 +58,6 @@ impl Contract {
     pub fn mint(&mut self, shares: U128) {
         self.require_owner();
         require!(!self.deposits.is_empty(), "No tokens have been deposited");
-        self.shares += shares.0;
-        self.accounts.insert(self.owner.clone(), self.shares);
         for (token_id, amount) in self.deposits.drain() {
             if let Some(reward) = self.rewards.get_mut(&token_id) {
                 *reward += amount;
@@ -64,53 +65,62 @@ impl Contract {
                 self.rewards.insert(token_id, amount);
             }
         }
+
+        if shares.0 > 0 {
+            self.shares += shares.0;
+            let owner_shares = self.accounts.get_mut(&self.owner).unwrap();
+            *owner_shares += shares.0;
+            FtMint {
+                owner_id: &self.owner,
+                amount: shares,
+                memo: None,
+            }
+            .emit();
+        }
+    }
+
+    // A bug in old `mint` function caused owner shares to have a wrong value.
+    // Tx ID: 9tuXaBjngENxiyE2NUF4FdyvJQbXcVEEyEiiNVdShFKv
+    #[private]
+    pub fn migrate(&mut self) {
+        let owner_shares = self.accounts.get_mut(&self.owner).unwrap();
+
+        FtBurn {
+            owner_id: &self.owner,
+            amount: (*owner_shares).into(),
+            memo: None,
+        }
+        .emit();
+
+        *owner_shares -= 185110043485353047406481875436;
         FtMint {
             owner_id: &self.owner,
-            amount: self.shares.into(),
+            amount: (*owner_shares).into(),
             memo: None,
         }
         .emit();
     }
 
-    #[private]
-    #[init(ignore_state)]
-    pub fn migrate(rewarder: AccountId, shitzu_token: AccountId) -> Self {
-        let contract: OldContract = env::state_read().unwrap();
+    pub fn upgrade(&self) -> Promise {
+        self.require_owner();
 
-        Self {
-            owner: contract.owner,
-            validator: contract.validator,
-            rewarder,
-            shitzu_token,
-            shitzu_nft: contract.shitzu_nft,
-            accounts: contract.accounts,
-            deposits: contract.deposits,
-            rewards: contract.rewards,
-            shares: contract.shares,
-            token_whitelist: contract.token_whitelist,
-        }
+        let code = env::input().expect("Error: No input").to_vec();
+
+        Promise::new(env::current_account_id())
+            .deploy_contract(code)
+            .as_return()
     }
 
-    // pub fn upgrade(&self) -> Promise {
-    //     self.require_owner();
+    pub fn upgrade_and_migrate(&self) -> Promise {
+        self.require_owner();
 
-    //     let code = env::input().expect("Error: No input").to_vec();
+        let code = env::input().expect("Error: No input").to_vec();
 
-    //     Promise::new(env::current_account_id())
-    //         .deploy_contract(code)
-    //         .as_return()
-    // }
-
-    // pub fn upgrade_and_migrate(&self) -> Promise {
-    //     self.require_owner();
-
-    //     let code = env::input().expect("Error: No input").to_vec();
-
-    //     Promise::new(env::current_account_id())
-    //         .deploy_contract(code)
-    //         .then(Self::ext(env::current_account_id()).migrate())
-    //         .as_return()
-    // }
+        Promise::new(env::current_account_id())
+            .deploy_contract(code)
+            .then(Self::ext(env::current_account_id()).migrate())
+            .as_return()
+    }
 }
 
 impl Contract {

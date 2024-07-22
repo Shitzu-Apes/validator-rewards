@@ -107,6 +107,7 @@ pub struct FarmingDetails {
     pub farm_id: Option<u64>,
 }
 
+#[allow(unused)]
 #[derive(Debug, Deserialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct HumanReadableFarm {
@@ -119,6 +120,7 @@ pub struct HumanReadableFarm {
     pub active: bool,
 }
 
+#[allow(unused)]
 #[derive(Debug, Deserialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct HumanReadableAccount {
