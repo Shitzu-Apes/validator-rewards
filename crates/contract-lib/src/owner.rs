@@ -26,7 +26,7 @@ impl Contract {
                 }
             })
         {
-            self.token_whitelist.remove(index);
+            (*self.token_whitelist).remove(index);
         } else {
             env::panic_str("Token not found in whitelist")
         }
@@ -44,6 +44,9 @@ impl Contract {
 
     pub fn withdraw_reward(&mut self, token_id: AccountId, amount: U128) -> Promise {
         self.require_owner();
+        if amount.0 == 0 {
+            env::panic_str("amount must be positive");
+        }
         let reward = self.rewards.get_mut(&token_id).unwrap();
         *reward -= amount.0;
         if *reward == 0 {
@@ -53,6 +56,18 @@ impl Contract {
             .with_unused_gas_weight(1)
             .with_attached_deposit(NearToken::from_yoctonear(1))
             .ft_transfer(self.owner.clone(), amount, None)
+    }
+
+    pub fn remove_reward(&mut self, token_id: AccountId) -> Promise {
+        self.require_owner();
+        let amount = self.rewards.remove(&token_id).unwrap();
+        if amount == 0 {
+            env::panic_str("No reward found for token");
+        }
+        ext_ft_core::ext(token_id)
+            .with_unused_gas_weight(1)
+            .with_attached_deposit(NearToken::from_yoctonear(1))
+            .ft_transfer(self.owner.clone(), U128(amount), None)
     }
 
     pub fn mint(&mut self, shares: U128) {

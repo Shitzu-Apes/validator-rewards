@@ -275,6 +275,31 @@ async fn test_basic_reward_distribution() -> anyhow::Result<()> {
             ]
         );
 
+        let (proposal_id, _) = call::propose_remove_reward(
+            &council,
+            dao_contract.id(),
+            contract.id(),
+            token_contracts[2].id(),
+        )
+        .await?;
+        call::act_proposal(
+            &council,
+            dao_contract.id(),
+            proposal_id,
+            Action::VoteApprove,
+        )
+        .await?;
+
+        let mut rewards = view::get_undistributed_rewards(&contract).await?;
+        rewards.sort_by_key(|reward: &(near_sdk::AccountId, U128)| reward.0.clone());
+        assert_eq!(
+            rewards,
+            vec![(
+                token_contracts[0].id().clone(),
+                U128(old_rewards[0].1 .0 - old_rewards[0].1 .0 / 2)
+            ),]
+        );
+
         anyhow::Ok(())
     })
     .await;

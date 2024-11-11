@@ -5,12 +5,7 @@
     "version": "1.0.0",
     "authors": [
       "Mario Reder <mario.reder@pm.me>"
-    ],
-    "build": {
-      "compiler": "rustc 1.79.0",
-      "builder": "cargo-near 0.6.3"
-    },
-    "wasm_hash": "5MKrRNoDaRnXx8D55otn8Rw6MSMUbKL6Uf3egDk14CGS"
+    ]
   },
   "body": {
     "functions": [
@@ -390,6 +385,27 @@
           "serialization_type": "json",
           "type_schema": {
             "type": "string"
+          }
+        }
+      },
+      {
+        "name": "remove_reward",
+        "kind": "call",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "token_id",
+              "type_schema": {
+                "$ref": "#/definitions/AccountId"
+              }
+            }
+          ]
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/Promise"
           }
         }
       },
