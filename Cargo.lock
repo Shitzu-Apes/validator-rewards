@@ -463,6 +463,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "contract-migrate"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "dotenv",
+ "near-contract-standards",
+ "near-sdk",
+ "near-workspaces",
+ "owo-colors",
+ "primitive-types 0.13.1",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "contract-test"
 version = "1.0.0"
 dependencies = [
@@ -742,6 +758,12 @@ name = "dmsort"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0bc8fbe9441c17c9f46f75dfe27fa1ddb6c68a461ccaed0481419219d4f10d3"
+
+[[package]]
+name = "dotenv"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77c90badedccf4105eca100756a0b1289e191f6fcbdadd3cee1d2f614f97da8f"
 
 [[package]]
 name = "dunce"

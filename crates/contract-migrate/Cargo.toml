@@ -1,0 +1,17 @@
+[package]
+name = "contract-migrate"
+version = "1.0.0"
+authors = ["Mario Reder <mario.reder@pm.me>"]
+edition = "2021"
+
+[dependencies]
+anyhow.workspace = true
+dotenv.workspace = true
+near-contract-standards.workspace = true
+near-sdk.workspace = true
+near-workspaces.workspace = true
+owo-colors.workspace = true
+primitive-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
