@@ -34,7 +34,9 @@ async fn main() -> anyhow::Result<()> {
         &reder,
         &dao_id,
         ProposalInput {
-            description: "Upgrade contract. This upgrade introduces a new function \"remove_reward\" which removes shitcoin rewards that have basically been depleted, but still exist with <0.01% APR".to_string(),
+            description:
+                "Upgrade contract. This upgrade will make the contract verifiable by sourcescan"
+                    .to_string(),
             kind: ProposalKind::UpgradeRemote {
                 receiver_id: receiver_id.clone(),
                 method_name: "upgrade".to_string(),
