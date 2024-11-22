@@ -54,9 +54,7 @@ pub enum StorageKey {
     TokenWhitelist,
 }
 
-#[near_bindgen(contract_metadata(
-    standard(standard = "148", version = "1.0.0")
-))]
+#[near_bindgen(contract_metadata(standard(standard = "nep148", version = "1.0.0")))]
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault)]
 #[borsh(crate = "near_sdk::borsh")]
 #[allow(deprecated)]
