@@ -34,9 +34,7 @@ async fn main() -> anyhow::Result<()> {
         &reder,
         &dao_id,
         ProposalInput {
-            description:
-                "Upgrade contract. This upgrade will make the contract verifiable by sourcescan"
-                    .to_string(),
+            description: "Upgrade contract. Fixes ABI and source link".to_string(),
             kind: ProposalKind::UpgradeRemote {
                 receiver_id: receiver_id.clone(),
                 method_name: "upgrade".to_string(),
