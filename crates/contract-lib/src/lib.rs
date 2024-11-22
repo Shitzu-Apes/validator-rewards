@@ -55,7 +55,6 @@ pub enum StorageKey {
 }
 
 #[near_bindgen(contract_metadata(
-    link = "https://github.com/Shitzu-Apes/validator-rewards",
     standard(standard = "148", version = "1.0.0")
 ))]
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault)]

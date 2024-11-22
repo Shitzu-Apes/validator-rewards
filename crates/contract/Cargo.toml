@@ -10,11 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 contract-lib = { path = "../contract-lib" }
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies.near-sdk]
-version = "5.0.0"
-default-features = false
-features = ["abi", "unstable"]
+near-sdk = { workspace = true }
 
 # fields to configure build with WASM reproducibility, according to specs  
 # in https://github.com/near/NEPs/blob/master/neps/nep-0330.md 
