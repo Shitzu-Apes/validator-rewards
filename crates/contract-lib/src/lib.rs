@@ -350,6 +350,7 @@ impl FungibleTokenReceiver for Contract {
 
 #[near_bindgen]
 impl FungibleTokenResolver for Contract {
+    #[private]
     fn ft_resolve_transfer(
         &mut self,
         sender_id: AccountId,

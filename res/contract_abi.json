@@ -93,6 +93,9 @@
       {
         "name": "ft_resolve_transfer",
         "kind": "call",
+        "modifiers": [
+          "private"
+        ],
         "params": {
           "serialization_type": "json",
           "args": [

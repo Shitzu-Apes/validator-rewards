@@ -7,7 +7,9 @@ use tokio::fs;
 async fn main() -> anyhow::Result<()> {
     dotenv::dotenv()?;
 
-    let worker = near_workspaces::mainnet().await?;
+    let worker = near_workspaces::mainnet()
+        .rpc_addr("https://rpc.shitzuapes.xyz")
+        .await?;
     let reder = Account::from_secret_key(
         "marior.near".parse()?,
         std::env::var("PRIVATE_KEY")?.parse()?,
@@ -34,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
         &reder,
         &dao_id,
         ProposalInput {
-            description: "Upgrade contract. Fixes ABI and source link".to_string(),
+            description: "Upgrade contract".to_string(),
             kind: ProposalKind::UpgradeRemote {
                 receiver_id: receiver_id.clone(),
                 method_name: "upgrade".to_string(),
