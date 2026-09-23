@@ -1712,14 +1712,7 @@ async fn test_rescue_stray_tokens() -> anyhow::Result<()> {
             token.id(),
         )
         .await?;
-        let (act_res, _act_events) = call::act_proposal(
-            &council,
-            dao_contract.id(),
-            proposal_id,
-            Action::VoteApprove,
-        )
-        .await?;
-        println!("DEBUG act outcome: {:?}", act_res);
+        call::act_proposal(&council, dao_contract.id(), proposal_id, Action::VoteApprove).await?;
 
         // The owner received exactly the stray amount back.
         let owner_balance_after = view::ft_balance_of(token, dao_contract.id()).await?;
