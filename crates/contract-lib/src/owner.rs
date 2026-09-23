@@ -82,15 +82,9 @@ impl Contract {
     // over the ledger-backed amount, so share holders' backing is untouchable.
     pub fn rescue(&mut self, token_id: AccountId) -> Promise {
         self.require_owner();
-        let args = serde_json::to_vec(&env::current_account_id())
-            .expect("Failed to serialize current account id");
-        Promise::new(token_id.clone())
-            .function_call(
-                "ft_balance_of".to_string(),
-                args,
-                NearToken::from_yoctonear(0),
-                GAS_FOR_RESCUE,
-            )
+        ext_ft_core::ext(token_id.clone())
+            .with_static_gas(GAS_FOR_RESCUE)
+            .ft_balance_of(env::current_account_id())
             .then(
                 Self::ext(env::current_account_id())
                     .with_static_gas(GAS_FOR_RESCUE)

@@ -9,7 +9,10 @@ anyhow.workspace = true
 dotenv.workspace = true
 near-contract-standards.workspace = true
 near-sdk.workspace = true
-near-workspaces.workspace = true
+# 0.21 is required to parse current mainnet RPC responses (0.14 fails with
+# `missing field is_slashed`). Pinned per-crate so contract-test can stay on
+# 0.14 for the externally-spawned sandbox.
+near-workspaces = { version = "0.21", default-features = false }
 owo-colors.workspace = true
 primitive-types.workspace = true
 serde.workspace = true

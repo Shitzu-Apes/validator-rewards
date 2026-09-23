@@ -1645,3 +1645,97 @@ async fn test_mint_additional_shares() -> anyhow::Result<()> {
         Ok(_) => anyhow::Ok(()),
     }
 }
+
+#[tokio::test]
+async fn test_rescue_stray_tokens() -> anyhow::Result<()> {
+    let mut chain = initialize_blockchain().await?;
+
+    let thread = tokio::spawn(async {
+        let Init {
+            council,
+            contract,
+            dao_contract,
+            token_contracts,
+            ..
+        } = initialize_contracts().await?;
+
+        let token = &token_contracts[0];
+        let deposit_amount = 1_000_000u128;
+        // Stray amount sent via a plain `ft_transfer` (no ft_transfer_call).
+        let stray_amount = 500_000u128;
+
+        // Register storage so the token can be received by the contract,
+        // the DAO (owner), the council (stray sender), and later rescued
+        // back to the owner.
+        call::storage_deposit(token, &council, None, None).await?;
+        call::storage_deposit(token, &council, Some(contract.id()), None).await?;
+        call::storage_deposit(token, &council, Some(dao_contract.id()), None).await?;
+
+        // Establish real ledger backing: a proper ft_transfer_call deposit.
+        call::mint_tokens(token, dao_contract.id(), deposit_amount).await?;
+        let (proposal_id, _) = call::propose_deposit_tokens(
+            &council,
+            dao_contract.id(),
+            token.id(),
+            contract.id(),
+            deposit_amount,
+        )
+        .await?;
+        call::act_proposal(&council, dao_contract.id(), proposal_id, Action::VoteApprove).await?;
+
+        // Mint so deposits drain into rewards (backing is now in `rewards`).
+        let shares = deposit_amount;
+        let (proposal_id, _) =
+            call::propose_mint_shares(&council, dao_contract.id(), contract.id(), shares).await?;
+        call::act_proposal(&council, dao_contract.id(), proposal_id, Action::VoteApprove).await?;
+
+        let rewards_before = view::get_undistributed_rewards(&contract).await?;
+        assert_eq!(rewards_before, vec![(token.id().clone(), U128(deposit_amount))]);
+
+        // A plain ft_transfer sends tokens straight to the contract's raw
+        // balance without ever crediting `deposits`/`rewards`.
+        call::mint_tokens(token, council.id(), stray_amount).await?;
+        call::ft_transfer(&council, token.id(), contract.id(), stray_amount).await?;
+
+        // The stray tokens are in the contract's raw balance, but the ledger
+        // (and therefore `rewards`) is unchanged.
+        let rewards_after_transfer = view::get_undistributed_rewards(&contract).await?;
+        assert_eq!(rewards_after_transfer, rewards_before);
+
+        let owner_balance_before = view::ft_balance_of(token, dao_contract.id()).await?;
+
+        // Rescue should reclaim only the excess (stray), not the backing.
+        let (proposal_id, _) = call::propose_rescue(
+            &council,
+            dao_contract.id(),
+            contract.id(),
+            token.id(),
+        )
+        .await?;
+        let (act_res, _act_events) = call::act_proposal(
+            &council,
+            dao_contract.id(),
+            proposal_id,
+            Action::VoteApprove,
+        )
+        .await?;
+        println!("DEBUG act outcome: {:?}", act_res);
+
+        // The owner received exactly the stray amount back.
+        let owner_balance_after = view::ft_balance_of(token, dao_contract.id()).await?;
+        assert_eq!(owner_balance_after.0 - owner_balance_before.0, stray_amount);
+
+        // The ledger backing for share holders is completely untouched.
+        let rewards_after_rescue = view::get_undistributed_rewards(&contract).await?;
+        assert_eq!(rewards_after_rescue, rewards_before);
+
+        anyhow::Ok(())
+    })
+    .await;
+    chain.kill()?;
+    match thread {
+        Err(err) => Err(anyhow::anyhow!(err)),
+        Ok(Err(err)) => Err(anyhow::anyhow!(err)),
+        Ok(_) => anyhow::Ok(()),
+    }
+}

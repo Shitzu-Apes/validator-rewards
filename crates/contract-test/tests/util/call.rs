@@ -309,6 +309,40 @@ pub async fn propose_withdraw_reward(
     .await
 }
 
+pub async fn propose_rescue(
+    sender: &Account,
+    dao: &AccountId,
+    contract_id: &AccountId,
+    token_id: &AccountId,
+) -> anyhow::Result<(u64, Vec<ContractEvent>)> {
+    add_proposal(
+        "propose_rescue",
+        sender,
+        dao,
+        ProposalInput {
+            description: "".to_string(),
+            kind: ProposalKind::FunctionCall {
+                receiver_id: contract_id.clone(),
+                actions: vec![ActionCall {
+                    method_name: "rescue".to_string(),
+                    args: Base64VecU8::from(
+                        json!({
+                            "token_id": token_id,
+                        })
+                        .to_string()
+                        .as_bytes()
+                        .to_vec(),
+                    ),
+                    deposit: NearToken::from_yoctonear(0),
+                    gas: Gas::from_tgas(200),
+                }],
+            },
+        },
+        NearToken::from_near(1),
+    )
+    .await
+}
+
 pub async fn propose_remove_reward(
     sender: &Account,
     dao: &AccountId,
@@ -427,6 +461,27 @@ pub async fn claim(
             .transact()
             .await?,
     )
+}
+
+// Plain NEP-141 transfer (no callback). Sends tokens straight to the
+// receiver's raw balance without crediting any `ft_on_transfer` ledger.
+pub async fn ft_transfer(
+    sender: &Account,
+    token: &AccountId,
+    receiver_id: &AccountId,
+    amount: u128,
+) -> anyhow::Result<ExecutionResult<Value>> {
+    let (res, _) = log_tx_result(
+        &format!("{} ft_transfer", token),
+        sender
+            .call(token, "ft_transfer")
+            .args_json((receiver_id, U128::from(amount), None::<String>))
+            .deposit(NearToken::from_yoctonear(1))
+            .max_gas()
+            .transact()
+            .await?,
+    )?;
+    Ok(res)
 }
 
 pub async fn burn(

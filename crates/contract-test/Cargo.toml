@@ -11,6 +11,10 @@ anyhow.workspace = true
 futures.workspace = true
 near-contract-standards.workspace = true
 near-sdk.workspace = true
-near-workspaces.workspace = true
+# Sandbox tests drive an externally-spawned near-sandbox 2.3.0 via
+# `initialize_blockchain`, whose RPC responses near-workspaces 0.21 cannot
+# parse. Keep the older client here; mainnet tooling (contract-migrate)
+# pins 0.21 separately.
+near-workspaces = { version = "0.14", default-features = false }
 owo-colors.workspace = true
 tokio.workspace = true
