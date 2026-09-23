@@ -243,8 +243,8 @@ impl FungibleTokenCore for Contract {
         let sender_id = env::predecessor_account_id();
         let amount = amount.0;
         require!(
-            sender_id == self.validator,
-            "Only validator can distribute tokens"
+            sender_id == self.validator || sender_id == self.owner,
+            "Only validator or owner can distribute tokens"
         );
         require!(amount > 0, "The amount should be a positive number");
 
@@ -258,7 +258,7 @@ impl FungibleTokenCore for Contract {
         *balance -= amount;
 
         FtTransfer {
-            old_owner_id: &self.validator,
+            old_owner_id: &sender_id,
             new_owner_id: &receiver_id,
             amount: U128(amount),
             memo: memo.as_deref(),
