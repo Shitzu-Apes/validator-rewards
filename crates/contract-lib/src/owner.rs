@@ -3,7 +3,13 @@ use near_contract_standards::fungible_token::{
     core::ext_ft_core,
     events::{FtBurn, FtMint},
 };
-use near_sdk::{env, json_types::U128, near_bindgen, require, AccountId, NearToken, Promise};
+use near_sdk::{
+    env, json_types::U128, near_bindgen, require, serde_json, AccountId, Gas, NearToken, Promise,
+    PromiseResult,
+};
+
+// Gas for querying the raw token balance and sending the rescue transfer.
+const GAS_FOR_RESCUE: Gas = Gas::from_tgas(20);
 
 #[near_bindgen]
 impl Contract {
@@ -68,6 +74,52 @@ impl Contract {
             .with_unused_gas_weight(1)
             .with_attached_deposit(NearToken::from_yoctonear(1))
             .ft_transfer(self.owner.clone(), U128(amount), None)
+    }
+
+    // Tokens sent here via a plain `ft_transfer` land in the token contract's
+    // raw balance but never reach `deposits` (only `ft_on_transfer`, i.e. an
+    // `ft_transfer_call`, credits that ledger). This rescues only the excess
+    // over the ledger-backed amount, so share holders' backing is untouchable.
+    pub fn rescue(&mut self, token_id: AccountId) -> Promise {
+        self.require_owner();
+        let args = serde_json::to_vec(&env::current_account_id())
+            .expect("Failed to serialize current account id");
+        Promise::new(token_id.clone())
+            .function_call(
+                "ft_balance_of".to_string(),
+                args,
+                NearToken::from_yoctonear(0),
+                GAS_FOR_RESCUE,
+            )
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_FOR_RESCUE)
+                    .on_rescue(token_id),
+            )
+    }
+
+    #[private]
+    pub fn on_rescue(&mut self, token_id: AccountId) -> U128 {
+        let raw = match env::promise_result(0) {
+            PromiseResult::Successful(value) => {
+                serde_json::from_slice::<U128>(&value).map_or(0, |amount| amount.0)
+            }
+            _ => 0,
+        };
+        let owed = self
+            .deposits
+            .get(&token_id)
+            .copied()
+            .unwrap_or_default()
+            .saturating_add(self.rewards.get(&token_id).copied().unwrap_or_default());
+        let stray = raw.saturating_sub(owed);
+        if stray > 0 {
+            ext_ft_core::ext(token_id)
+                .with_unused_gas_weight(1)
+                .with_attached_deposit(NearToken::from_yoctonear(1))
+                .ft_transfer(self.owner.clone(), stray.into(), Some("rescue".to_string()));
+        }
+        U128(stray)
     }
 
     pub fn mint(&mut self, shares: U128) {
