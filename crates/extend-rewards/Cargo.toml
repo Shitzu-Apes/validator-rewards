@@ -1,0 +1,21 @@
+[package]
+name = "extend-rewards"
+version = "1.0.0"
+authors = ["Mario Reder <mario.reder@pm.me>"]
+edition = "2021"
+
+[dependencies]
+anyhow.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+# Pinned below 4.6: its clap_derive requires proc-macro2 >= 1.0.106, while the
+# workspace lockfile is pinned to 1.0.92 for the sandbox test dependencies.
+clap = { version = "=4.5.58", features = ["derive", "env"] }
+dotenv.workspace = true
+near-sdk.workspace = true
+# Mainnet tooling uses 0.21 (same as contract-migrate); the sandbox tests pin
+# the older client separately.
+near-workspaces = { version = "0.21", default-features = false }
+reqwest = { version = "0.12", features = ["json"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
